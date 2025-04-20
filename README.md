@@ -1,4 +1,4 @@
-# pitwall-drs
+# pitwall-drs (Data Relay Service)
 This is a basic Go application designed to act as a proxy and fanout for the Formula 1 TV live timing data stream (SignalR).
 
 ## Purpose
