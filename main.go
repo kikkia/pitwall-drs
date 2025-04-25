@@ -3,12 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
-	"strings"
 
 	"f1sockets/model"
 
@@ -46,8 +47,8 @@ var (
 	logBuffer      = make([]string, 0, 100)
 	logBufferMutex sync.Mutex
 	logFlushTicker = time.NewTicker(2 * time.Second)
-	logFilePath  = "recordings/f1tv_events_sa_race.txt"
-	DEBUG = false
+	logFilePath    = "recordings/f1tv_events_sa_race.txt"
+	DEBUG          = true
 )
 
 var upgrader = websocket.Upgrader{
@@ -67,10 +68,12 @@ func main() {
 	// New HTTP endpoint to serve the latest DriverList data
 	http.HandleFunc("/state", handleState)
 
+	http.HandleFunc("/apply", handleApply)
+
 	// routine for connection and proxying it out
 	go manageF1TVConnection()
 
-	if (DEBUG) {
+	if DEBUG {
 		go func() {
 			for range logFlushTicker.C {
 				logBufferMutex.Lock()
@@ -78,7 +81,7 @@ func main() {
 					toWrite := logBuffer
 					logBuffer = make([]string, 0, 100)
 					logBufferMutex.Unlock()
-		
+
 					f, err := ioutil.ReadFile(logFilePath)
 					if err != nil {
 						f = []byte{}
@@ -94,7 +97,7 @@ func main() {
 			}
 		}()
 	}
-	
+
 	err := http.ListenAndServe(listenAddr, nil)
 	if err != nil {
 		fmt.Printf("HTTP server failed: %v\n", err)
@@ -156,7 +159,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	if state == nil {
-		w.WriteHeader(http.StatusServiceUnavailable) 
+		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]string{"message": "Driver data not yet available"})
 		return
 	}
@@ -168,6 +171,51 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func handleApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		http.Error(w, "Invalid JSON payload: "+err.Error(), http.StatusBadRequest)
+		fmt.Printf("Error decoding JSON: %v\nRaw body: %s\n", err, string(bodyBytes))
+		return
+	}
+
+	if mArray, ok := payload["M"].([]interface{}); ok {
+		for _, msgInterface := range mArray {
+			if msgMap, ok := msgInterface.(map[string]interface{}); ok {
+				// Check if it's a "feed" message
+				if hub, hubOk := msgMap["H"].(string); hubOk && hub == "Streaming" {
+					if method, methodOk := msgMap["M"].(string); methodOk && method == "feed" {
+						if args, argsOk := msgMap["A"].([]interface{}); argsOk {
+							// Ensure globalState is not nil before trying to update
+							if globalState != nil {
+								err := globalState.ApplyFeedUpdate(args)
+								if err != nil {
+									fmt.Printf("Failed to apply feed update: %v\n Update Args: %v\n", err, args)
+								}
+							} else {
+								fmt.Println("Skipping feed update as global state is not yet initialized.")
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Feed update applied successfully"))
+}
 
 func manageF1TVConnection() {
 	for {
@@ -177,7 +225,7 @@ func manageF1TVConnection() {
 		if err != nil {
 			fmt.Printf("Negotiation failed: %v. Retrying in 5 seconds...\n", err)
 			time.Sleep(5 * time.Second)
-			continue 
+			continue
 		}
 		fmt.Println("Negotiation successful.")
 
@@ -199,13 +247,13 @@ func manageF1TVConnection() {
 				break
 			}
 
-			fmt.Printf("Received from F1TV (%d bytes): %s\n", len(message), message) 
+			fmt.Printf("Received from F1TV (%d bytes): %s\n", len(message), message)
 
-			if (DEBUG) {
+			if DEBUG {
 				logEntry := fmt.Sprintf("[%s] %s", time.Now().Format(time.RFC3339), message)
 				logBufferMutex.Lock()
 				logBuffer = append(logBuffer, logEntry)
-				logBufferMutex.Unlock()	
+				logBufferMutex.Unlock()
 			}
 
 			var signalRMessage map[string]interface{}
@@ -252,7 +300,7 @@ func manageF1TVConnection() {
 					// Client likely disconnected, will be removed by handleBrowserConnections
 				}
 			}
-			manager.RUnlock() 
+			manager.RUnlock()
 		}
 
 		// Only will reach this in an error state, so chill a sec before retrying
@@ -292,8 +340,8 @@ func negotiate() (string, string, error) {
 		// split off options like 'path'
 		cookie = setCookieHeaders[0]
 		if semiIndex := (len(cookie)); semiIndex > 0 {
-           cookie = cookie[:semiIndex]
-        }
+			cookie = cookie[:semiIndex]
+		}
 	}
 
 	if negotiateResp.ConnectionToken == "" {
@@ -309,7 +357,7 @@ func connectF1TVWebSocket(token, cookie string) (*websocket.Conn, error) {
 	wsURL := fmt.Sprintf("wss://livetiming.formula1.com/signalr/connect?clientProtocol=%s&transport=webSockets&connectionToken=%s&connectionData=%s", clientProtocol, encodedToken, connectionData)
 
 	headers := http.Header{}
-	headers.Add("User-Agent", "f1-testing") 
+	headers.Add("User-Agent", "f1-testing")
 	headers.Add("Accept-Encoding", "gzip,identity")
 	if cookie != "" {
 		headers.Add("Cookie", cookie)
@@ -351,7 +399,7 @@ func sendSubscribeMessage(conn *websocket.Conn) {
 	subscribeMessage := map[string]interface{}{
 		"H": hubName,
 		"M": "Subscribe",
-	    "A": []interface{}{topics},
+		"A": []interface{}{topics},
 		"I": 1,
 	}
 
