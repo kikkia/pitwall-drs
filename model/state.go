@@ -1060,6 +1060,7 @@ func (gs *GlobalState) GetStateAsJSON() ([]byte, error) {
 		SessionInfo:         gs.R.SessionInfo,
 		SessionData:         gs.R.SessionData,
 		TimingData:          gs.R.TimingData,
+		TyreStintSeries:     gs.R.TyreStintSeries,
 	}
 
 	// Wrap the struct within the top-level "R" key map
