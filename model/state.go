@@ -126,6 +126,14 @@ type StintInfo struct {
 	LapNumber       int    `json:"LapNumber,omitempty"` // Lap number of fastest lap?
 }
 
+type TyreStint struct {
+	Compound        string `json:"Compound"`        // e.g., "SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET"
+	New             string `json:"New"`             // String "true" or "false" - but f1 sends as string :/
+	TyresNotChanged string `json:"TyresNotChanged"` // String "0" or "1" - f1 sends int but its a bool :/
+	TotalLaps       int    `json:"TotalLaps"`       // Laps in this stint
+	StartLaps       int    `json:"StartLaps"`       // Lap number stint started on
+}
+
 type RaceControlData struct {
 	Messages []RaceControlMessage `json:"Messages"`
 }
@@ -263,6 +271,10 @@ type LapTimeInfo struct {
 	Lap             int    `json:"Lap,omitempty"`
 }
 
+type TyreStintSeries struct {
+	Stints map[string][]TyreStint `json:"Stints"`
+}
+
 type RaceData struct {
 	Heartbeat           *Heartbeat         `json:"Heartbeat,omitempty"`
 	ExtrapolatedClock   *ExtrapolatedClock `json:"ExtrapolatedClock,omitempty"`
@@ -275,6 +287,7 @@ type RaceData struct {
 	SessionInfo         *SessionInfoData   `json:"SessionInfo,omitempty"`
 	SessionData         *SessionData       `json:"SessionData,omitempty"`
 	TimingData          *TimingData        `json:"TimingData,omitempty"`
+	TyreStintSeries     *TyreStintSeries   `json:"TyreStintSeries,omitempty"`
 
 	DriverList map[string]DriverInfo `json:"DriverList,omitempty"`
 	CarDataZ   string                `json:"CarData.z,omitempty"`
@@ -302,6 +315,7 @@ type raceDataForJSON struct {
 	SessionInfo         *SessionInfoData      `json:"SessionInfo,omitempty"`
 	SessionData         *SessionData          `json:"SessionData,omitempty"`
 	TimingData          *TimingData           `json:"TimingData,omitempty"`
+	TyreStintSeries     *TyreStintSeries      `json:"TyreStintSeries,omitempty"`
 }
 
 func NewEmptyGlobalState() *GlobalState {
@@ -403,6 +417,7 @@ func NewGlobalState(initialJsonData []byte) (*GlobalState, error) {
 		"TimingData":          newState.R.TimingData,
 		"CarData.z":           &newState.R.CarDataZ,
 		"Position.z":          &newState.R.PositionZ,
+		"TyreStintSeries":     &newState.R.TyreStintSeries,
 	}
 
 	for key, target := range fieldsToPopulate {
@@ -1107,6 +1122,8 @@ func applyMapUpdatesToSlice(targetSlicePtr interface{}, updateMap map[string]jso
 		elementPtr := sliceVal.Index(index).Addr().Interface() // Get pointer to T (e.g., *TimeAndLapInfo)
 
 		// Unmarshal the update data into the existing element (merges)
+		// TODO: Better handle sector timing segments
+		// This produces warnings on every sectorTiming segments.
 		if err := json.Unmarshal(rawData, elementPtr); err != nil {
 			fmt.Printf("Warning: Failed to apply map update to slice element at index %d: %v. Data: %s\n", index, err, string(rawData))
 		}
