@@ -275,6 +275,11 @@ type TyreStintSeries struct {
 	Stints map[string][]TyreStint `json:"Stints"`
 }
 
+type LapCount struct {
+	CurrentLap int `json:CurrentLap`
+	TotalLaps  int `json:TotalLaps`
+}
+
 type RaceData struct {
 	Heartbeat           *Heartbeat         `json:"Heartbeat,omitempty"`
 	ExtrapolatedClock   *ExtrapolatedClock `json:"ExtrapolatedClock,omitempty"`
@@ -292,6 +297,7 @@ type RaceData struct {
 	DriverList map[string]DriverInfo `json:"DriverList,omitempty"`
 	CarDataZ   string                `json:"CarData.z,omitempty"`
 	PositionZ  string                `json:"Position.z,omitempty"`
+	LapCount   *LapCount             `json:LapCount,omitempty`
 }
 
 type GlobalState struct {
@@ -316,6 +322,7 @@ type raceDataForJSON struct {
 	SessionData         *SessionData          `json:"SessionData,omitempty"`
 	TimingData          *TimingData           `json:"TimingData,omitempty"`
 	TyreStintSeries     *TyreStintSeries      `json:"TyreStintSeries,omitempty"`
+	LapCount            *LapCount             `json:LapCount,omitempty`
 }
 
 func NewEmptyGlobalState() *GlobalState {
@@ -348,6 +355,7 @@ func NewEmptyGlobalState() *GlobalState {
 			},
 
 			DriverList: make(map[string]DriverInfo),
+			LapCount:   &LapCount{},
 		},
 	}
 }
@@ -418,6 +426,7 @@ func NewGlobalState(initialJsonData []byte) (*GlobalState, error) {
 		"CarData.z":           &newState.R.CarDataZ,
 		"Position.z":          &newState.R.PositionZ,
 		"TyreStintSeries":     &newState.R.TyreStintSeries,
+		"LapCount":            newState.R.LapCount,
 	}
 
 	for key, target := range fieldsToPopulate {
@@ -505,6 +514,14 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 			gs.R.TrackStatus = &TrackStatus{}
 		}
 		if err := json.Unmarshal(payloadBytes, gs.R.TrackStatus); err != nil {
+			return fmt.Errorf("failed to unmarshal TrackStatus payload: %w", err)
+		}
+
+	case "LapCount":
+		if gs.R.LapCount == nil {
+			gs.R.LapCount = &LapCount{}
+		}
+		if err := json.Unmarshal(payloadBytes, gs.R.LapCount); err != nil {
 			return fmt.Errorf("failed to unmarshal TrackStatus payload: %w", err)
 		}
 
@@ -793,6 +810,7 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 			Messages map[string]json.RawMessage `json:"Messages"`
 		}
 
+		// TODO: First message is not parsed correctly, it doesnt have map just array
 		var updatePayload RaceControlUpdatePayload
 		if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
 			fmt.Printf("Warning: Failed to unmarshal RaceControlMessages payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
@@ -1126,7 +1144,7 @@ func applyMapUpdatesToSlice(targetSlicePtr interface{}, updateMap map[string]jso
 		// TODO: Better handle sector timing segments
 		// This produces warnings on every sectorTiming segments.
 		if err := json.Unmarshal(rawData, elementPtr); err != nil {
-			fmt.Printf("Warning: Failed to apply map update to slice element at index %d: %v. Data: %s\n", index, err, string(rawData))
+			//fmt.Printf("Warning: Failed to apply map update to slice element at index %d: %v. Data: %s\n", index, err, string(rawData))
 		}
 
 		// Special handling for nested Segments within Sectors
