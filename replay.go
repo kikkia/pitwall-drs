@@ -17,14 +17,10 @@ import (
 )
 
 const (
-	// Address for the replay server to listen on
-	replayListenAddr = "localhost:8080"
-	// Path to the recorded F1 session file
-	recordingFilePath = "recordings/f1tv_events_sa_race.txt" // Make sure this path is correct
-	// Delay after first client connects before starting replay
-	startDelay = 5 * time.Second
+	replayListenAddr  = "localhost:8080"
+	recordingFilePath = "recordings/f1tv_events_sa_race.txt"
+	startDelay        = 5 * time.Second
 
-	// RFC3339 format used in the log file timestamps
 	timestampLayout = time.RFC3339
 )
 
@@ -33,19 +29,16 @@ var (
 	globalState       = model.NewEmptyGlobalState()
 )
 
-// Structure to hold a single recorded message
 type RecordedMessage struct {
 	Timestamp time.Time
 	Payload   []byte
 }
 
-// Manages connected replay clients
 type ReplayClientManager struct {
-	clients    map[*websocket.Conn]bool
-	clientsMux sync.RWMutex
-	// Channel to signal when the first client has connected
+	clients              map[*websocket.Conn]bool
+	clientsMux           sync.RWMutex
 	firstClientConnected chan struct{}
-	once                 sync.Once // Ensures the channel is closed only once
+	once                 sync.Once
 }
 
 var replayManager = ReplayClientManager{
@@ -55,7 +48,6 @@ var replayManager = ReplayClientManager{
 
 var replayUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		// Allow connections from any origin for testing
 		return true
 	},
 }
@@ -64,20 +56,16 @@ func main() {
 	log.Printf("Starting F1 Replay Server on %s", replayListenAddr)
 	log.Printf("Will replay events from: %s", recordingFilePath)
 
-	// Start the replay logic in a separate goroutine
 	go runReplayLogic()
 
-	// WebSocket endpoint for clients to connect
 	http.HandleFunc("/ws", handleReplayConnections)
 
-	// Start the HTTP server
 	err := http.ListenAndServe(replayListenAddr, nil)
 	if err != nil {
 		log.Fatalf("Replay HTTP server failed: %v\n", err)
 	}
 }
 
-// Handles incoming WebSocket connections for the replay
 func handleReplayConnections(w http.ResponseWriter, r *http.Request) {
 	conn, err := replayUpgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -106,7 +94,6 @@ func handleReplayConnections(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Replay client connected: %s. Total clients: %d\n", conn.RemoteAddr(), len(replayManager.clients))
 
-	// Signal that the first client has connected, if applicable
 	if isFirstClient {
 		replayManager.once.Do(func() {
 			log.Println("First client connected, signaling replay start...")
@@ -114,20 +101,17 @@ func handleReplayConnections(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Keep the connection alive, wait for disconnection
 	for {
-		// We don't expect messages from the client in this simple replay scenario
 		if _, _, err := conn.ReadMessage(); err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("Replay client read error: %v", err)
 			} else {
 				log.Printf("Replay client disconnected normally: %s", conn.RemoteAddr())
 			}
-			break // Exit loop on error or close
+			break
 		}
 	}
 
-	// Clean up disconnected client
 	replayManager.clientsMux.Lock()
 	delete(replayManager.clients, conn)
 	log.Printf("Replay client removed: %s. Total clients: %d\n", conn.RemoteAddr(), len(replayManager.clients))
@@ -155,7 +139,6 @@ func parseLogLine(line string) (*RecordedMessage, error) {
 		return nil, fmt.Errorf("empty payload")
 	}
 
-	// Basic check if it looks like JSON, more robust validation could be added if needed
 	if !strings.HasPrefix(payloadStr, "{") && !strings.HasPrefix(payloadStr, "[") {
 		log.Printf("Skipping line with non-JSON payload: %s", payloadStr)
 		return nil, fmt.Errorf("payload does not look like JSON")
@@ -172,7 +155,6 @@ func parseLogLine(line string) (*RecordedMessage, error) {
 	}, nil
 }
 
-// Reads the recording file and replays messages to connected clients
 func runReplayLogic() {
 	log.Println("Replay logic started, waiting for first client...")
 	<-replayManager.firstClientConnected // Wait for the signal
@@ -195,16 +177,13 @@ func runReplayLogic() {
 		line := scanner.Text()
 		msg, err := parseLogLine(line)
 		if err != nil {
-			// Log parse errors for debugging, but continue processing other lines
-			// log.Printf("Skipping line %d due to parse error: %v (line: %s)", lineNum, err, line)
-			continue // Skip lines that can't be parsed
+			continue
 		}
 		messages = append(messages, *msg)
 	}
 
 	if err := scanner.Err(); err != nil {
 		log.Printf("ERROR reading recording file: %v", err)
-		// Continue with messages parsed so far, if any
 	}
 
 	if len(messages) == 0 {
@@ -214,17 +193,7 @@ func runReplayLogic() {
 
 	log.Printf("Parsed %d messages. Starting replay loop.", len(messages))
 
-	// Sort messages just in case they aren't perfectly chronological in the file
-	// Although bufio.Scanner reads sequentially, explicit sort is safer.
-	// Note: time.Time comparison works correctly.
-	// Use sort.SliceStable if original order for same timestamp matters, but unlikely needed here.
-	// sort.Slice(messages, func(i, j int) bool {
-	// 	return messages[i].Timestamp.Before(messages[j].Timestamp)
-	// })
-	// --> Assuming file is already chronological, skipping sort for efficiency. Add back if needed.
-
 	var previousTimestamp time.Time
-	// Send the first message immediately
 	firstMsg := messages[0]
 	log.Printf("Sending first message (Timestamp: %s)", firstMsg.Timestamp.Format(time.RFC3339))
 	broadcastMessage(firstMsg.Payload)
@@ -236,7 +205,6 @@ func runReplayLogic() {
 		return
 	}
 
-	// Replay subsequent messages with delays
 	for i := 1; i < len(messages); i++ {
 		msg := messages[i]
 		delay := msg.Timestamp.Sub(previousTimestamp)
@@ -246,23 +214,19 @@ func runReplayLogic() {
 			log.Printf("Race started, shifting timeFactor back to 1")
 		}
 
-		// Ensure delay is not negative (if timestamps are weirdly ordered)
 		if delay < 0 {
 			log.Printf("Warning: Negative delay calculated between message %d and %d. Sending immediately.", i-1, i)
 			delay = 0
 		}
 
-		// Check if any clients are connected before sleeping and sending
 		replayManager.clientsMux.RLock()
 		replayManager.clientsMux.RUnlock()
 
 		if delay > 0 {
 			delay = time.Duration((1000 / timeFactor)) * time.Millisecond
-			// log.Printf("Sleeping for %v before next message", delay) // Verbose logging
 			time.Sleep(delay)
 		}
 
-		// log.Printf("Sending message %d (Timestamp: %s)", i, msg.Timestamp.Format(time.RFC3339)) // Verbose logging
 		broadcastMessage(msg.Payload)
 		previousTimestamp = msg.Timestamp
 	}
@@ -270,26 +234,20 @@ func runReplayLogic() {
 	log.Println("Replay finished or stopped.")
 }
 
-// Sends a message to all connected replay clients
 func broadcastMessage(payload []byte) {
 	replayManager.clientsMux.RLock()
 	defer replayManager.clientsMux.RUnlock()
 
-	// Store in state
 	applyGlobalState(payload)
 
 	if len(replayManager.clients) == 0 {
-		return // No clients to send to
+		return
 	}
-
-	// log.Printf("Broadcasting message to %d clients: %s", len(replayManager.clients), string(payload)) // Verbose
 
 	for client := range replayManager.clients {
 		err := client.WriteMessage(websocket.TextMessage, payload)
 		if err != nil {
 			log.Printf("Error sending message to client %s: %v. Will remove on next cycle.", client.RemoteAddr(), err)
-			// The handleReplayConnections read loop will handle the actual removal.
-			// Alternatively, could trigger removal here, but requires careful locking.
 		}
 	}
 }
@@ -297,7 +255,6 @@ func broadcastMessage(payload []byte) {
 func applyGlobalState(payload []byte) {
 	var signalRMessage map[string]interface{}
 	if err := json.Unmarshal(payload, &signalRMessage); err == nil {
-		// R at top level denotes a global state update message
 		if _, ok := signalRMessage["R"].(map[string]interface{}); ok {
 			globalState, err = model.NewGlobalState(payload)
 			if err != nil {
@@ -307,11 +264,9 @@ func applyGlobalState(payload []byte) {
 		if mArray, ok := signalRMessage["M"].([]interface{}); ok {
 			for _, msgInterface := range mArray {
 				if msgMap, ok := msgInterface.(map[string]interface{}); ok {
-					// Check if it's a "feed" message
 					if hub, hubOk := msgMap["H"].(string); hubOk && hub == "Streaming" {
 						if method, methodOk := msgMap["M"].(string); methodOk && method == "feed" {
 							if args, argsOk := msgMap["A"].([]interface{}); argsOk {
-								// Ensure globalState is not nil before trying to update
 								if globalState != nil {
 									err := globalState.ApplyFeedUpdate(args)
 									if err != nil {
