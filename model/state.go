@@ -806,22 +806,36 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 			gs.R.TimingAppData.Lines[driverNumber] = existingAppData
 		}
 	case "RaceControlMessages":
+		if gs.R.RaceControlMessages == nil {
+			gs.R.RaceControlMessages = &RaceControlData{Messages: make([]RaceControlMessage, 0)}
+		}
+		if gs.R.RaceControlMessages.Messages == nil {
+			gs.R.RaceControlMessages.Messages = make([]RaceControlMessage, 0)
+		}
+
 		type RaceControlUpdatePayload struct {
 			Messages map[string]json.RawMessage `json:"Messages"`
+		}
+
+		type RaceControlInitialPayload struct {
+			Messages []RaceControlMessage
 		}
 
 		// TODO: First message is not parsed correctly, it doesnt have map just array
 		var updatePayload RaceControlUpdatePayload
 		if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
 			fmt.Printf("Warning: Failed to unmarshal RaceControlMessages payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
-			return nil
-		}
-
-		if gs.R.RaceControlMessages == nil {
-			gs.R.RaceControlMessages = &RaceControlData{Messages: make([]RaceControlMessage, 0)}
-		}
-		if gs.R.RaceControlMessages.Messages == nil {
-			gs.R.RaceControlMessages.Messages = make([]RaceControlMessage, 0)
+			var initialPayload RaceControlInitialPayload
+			if err := json.Unmarshal(payloadBytes, &initialPayload); err != nil {
+				fmt.Printf("Warning: Failed to unmarshal RaceControlMessages payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
+				return nil
+			}
+			// Fill initial
+			if len(gs.R.RaceControlMessages.Messages) == 0 {
+				gs.R.RaceControlMessages.Messages = initialPayload.Messages
+			} else {
+				gs.R.RaceControlMessages.Messages = append(gs.R.RaceControlMessages.Messages, initialPayload.Messages...)
+			}
 		}
 
 		// TODO: Enforce the order based on these keys (appears to be index), testing for now if its ok
