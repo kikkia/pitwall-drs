@@ -280,6 +280,18 @@ type LapCount struct {
 	TotalLaps  int `json:TotalLaps`
 }
 
+type CompletedLap struct {
+	Lap     int            `json:"Lap"`
+	LapTime string         `json:"LapTime"` // Lap time string "M:SS.fff", empty if not set/valid
+	Sectors []SectorTiming `json:"Sectors"` // Current/last lap sector info (Index 0=S1, 1=S2, 2=S3)
+	Pitted  bool           `json:Pitted`    // If the car was in the pits at any time that lap
+}
+
+type LapHistory struct {
+	Driver        string         `json:RacingNumber`
+	CompletedLaps []CompletedLap `json:LapHistory`
+}
+
 type RaceData struct {
 	Heartbeat           *Heartbeat         `json:"Heartbeat,omitempty"`
 	ExtrapolatedClock   *ExtrapolatedClock `json:"ExtrapolatedClock,omitempty"`
@@ -294,10 +306,11 @@ type RaceData struct {
 	TimingData          *TimingData        `json:"TimingData,omitempty"`
 	TyreStintSeries     *TyreStintSeries   `json:"TyreStintSeries,omitempty"`
 
-	DriverList map[string]DriverInfo `json:"DriverList,omitempty"`
-	CarDataZ   string                `json:"CarData.z,omitempty"`
-	PositionZ  string                `json:"Position.z,omitempty"`
-	LapCount   *LapCount             `json:LapCount,omitempty`
+	DriverList       map[string]DriverInfo `json:"DriverList,omitempty"`
+	CarDataZ         string                `json:"CarData.z,omitempty"`
+	PositionZ        string                `json:"Position.z,omitempty"`
+	LapCount         *LapCount             `json:LapCount,omitempty`
+	DriverLapHistory map[string]LapHistory `json:LapHistory`
 }
 
 type GlobalState struct {
@@ -1032,6 +1045,9 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 				if err := applyMapUpdatesToSlice(&existingDriverData.Sectors, sliceUpdates.Sectors); err != nil {
 					fmt.Printf("Warning: Error applying Sectors/Segments updates for driver %s: %v\n", driverNumber, err)
 				}
+
+				// TODO: Also record this sector time into their lap history
+
 			}
 
 			type DeletionHint struct {

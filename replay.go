@@ -18,7 +18,7 @@ import (
 
 const (
 	replayListenAddr  = "localhost:8080"
-	recordingFilePath = "recordings/f1tv_events_sa_race.txt"
+	recordingFilePath = "recordings/f1tv_events_spain_race.txt"
 	startDelay        = 5 * time.Second
 
 	timestampLayout = time.RFC3339
@@ -67,6 +67,7 @@ func main() {
 }
 
 func handleReplayConnections(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Handling connection")
 	conn, err := replayUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Failed to upgrade replay connection: %v", err)
@@ -199,7 +200,7 @@ func runReplayLogic() {
 	broadcastMessage(firstMsg.Payload)
 	previousTimestamp = firstMsg.Timestamp
 
-	raceStart, err := time.Parse(timestampLayout, "2025-04-21T02:03:59+09:00")
+	raceStart, err := time.Parse(timestampLayout, "2025-06-01T22:03:36+09:00")
 	if err != nil {
 		log.Printf("REEEEE %s", err)
 		return
