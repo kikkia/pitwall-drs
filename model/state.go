@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
+
+	"github.com/tidwall/gjson"
 )
 
 type Heartbeat struct {
@@ -281,10 +285,11 @@ type LapCount struct {
 }
 
 type CompletedLap struct {
-	Lap     int            `json:"Lap"`
-	LapTime string         `json:"LapTime"` // Lap time string "M:SS.fff", empty if not set/valid
-	Sectors []SectorTiming `json:"Sectors"` // Current/last lap sector info (Index 0=S1, 1=S2, 2=S3)
-	Pitted  bool           `json:Pitted`    // If the car was in the pits at any time that lap
+	Lap          int            `json:"Lap"`
+	LapTime      string         `json:"LapTime"` // Lap time string "M:SS.fff", empty if not set/valid
+	Sectors      []SectorTiming `json:"Sectors"` // Current/last lap sector info (Index 0=S1, 1=S2, 2=S3)
+	Pitted       bool           `json:Pitted`    // If the car was in the pits at any time that lap
+	TyreCompound string         `json:Compound`  // The tyre compound used on that lap
 }
 
 type LapHistory struct {
@@ -336,6 +341,7 @@ type raceDataForJSON struct {
 	TimingData          *TimingData           `json:"TimingData,omitempty"`
 	TyreStintSeries     *TyreStintSeries      `json:"TyreStintSeries,omitempty"`
 	LapCount            *LapCount             `json:LapCount,omitempty`
+	DriverLapHistory    map[string]LapHistory `json:LapHistory`
 }
 
 func NewEmptyGlobalState() *GlobalState {
@@ -367,8 +373,9 @@ func NewEmptyGlobalState() *GlobalState {
 				NoEntries: make([]int, 0),
 			},
 
-			DriverList: make(map[string]DriverInfo),
-			LapCount:   &LapCount{},
+			DriverList:       make(map[string]DriverInfo),
+			LapCount:         &LapCount{},
+			DriverLapHistory: make(map[string]LapHistory),
 		},
 	}
 }
@@ -1046,7 +1053,17 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 					fmt.Printf("Warning: Error applying Sectors/Segments updates for driver %s: %v\n", driverNumber, err)
 				}
 
-				// TODO: Also record this sector time into their lap history
+				// TODO: Also record this sector time / segment into their lap history
+
+				// If its the last sector finishing then we will add the current timing details as a new
+				// lap to the history
+				sector, exists := sliceUpdates.Sectors["2"]
+				if exists {
+					sector2ValueResult := gjson.Get(string(sector), "Value")
+					if sector2ValueResult.Exists() && sector2ValueResult.Str != "" {
+						gs.saveLapToHistory(driverNumber)
+					}
+				}
 
 			}
 
@@ -1110,6 +1127,7 @@ func (gs *GlobalState) GetStateAsJSON() ([]byte, error) {
 		TimingData:          gs.R.TimingData,
 		TyreStintSeries:     gs.R.TyreStintSeries,
 		LapCount:            gs.R.LapCount,
+		DriverLapHistory:    gs.R.DriverLapHistory,
 	}
 
 	// Wrap the struct within the top-level "R" key map
@@ -1203,4 +1221,164 @@ func applyMapUpdatesToSlice(targetSlicePtr interface{}, updateMap map[string]jso
 		}
 	}
 	return nil
+}
+
+func (gs *GlobalState) saveLapToHistory(driverNum string) {
+	driverTiming, exists := gs.R.TimingData.Lines[driverNum]
+	if !exists {
+		fmt.Printf("Warning (saveLapToHistory): TimingData not found for driver %s.\n", driverNum)
+		return
+	}
+
+	if driverTiming.NumberOfLaps <= 0 {
+		// TODO: change up to more relevant debug
+		fmt.Printf("Info (saveLapToHistory): No valid last lap time to record for driver %s (Lap: %d, Time: '%s').\n",
+			driverNum, driverTiming.LastLapTime.Lap, driverTiming.LastLapTime.Value)
+		return
+	}
+
+	if gs.R.DriverLapHistory == nil {
+		gs.R.DriverLapHistory = make(map[string]LapHistory)
+	}
+
+	lapHistory, historyExists := gs.R.DriverLapHistory[driverNum]
+	if !historyExists {
+		lapHistory = LapHistory{
+			Driver:        driverNum,
+			CompletedLaps: make([]CompletedLap, 0),
+		}
+	}
+
+	currentSectors := make([]SectorTiming, len(driverTiming.Sectors))
+	if len(driverTiming.Sectors) > 0 {
+		for i, s := range driverTiming.Sectors {
+			copiedSector := s
+
+			if len(s.Segments) > 0 {
+				copiedSector.Segments = make([]SegmentStatus, len(s.Segments))
+				copy(copiedSector.Segments, s.Segments)
+			} else {
+				copiedSector.Segments = make([]SegmentStatus, 0)
+			}
+			currentSectors[i] = copiedSector
+		}
+	}
+
+	lapTime, err := sumOfSectors(currentSectors)
+	if err != nil {
+		fmt.Printf("Info (saveLapToHistory): failed to extrapolate laptime %s (Lap: %d, err: '%s').\n",
+			driverNum, driverTiming.NumberOfLaps, err)
+		return
+	}
+	fmt.Printf("Calculated laptime for %s: %s\n", driverNum, lapTime)
+
+	newCompletedLap := CompletedLap{
+		Lap:     driverTiming.NumberOfLaps,
+		LapTime: lapTime,
+		Sectors: currentSectors,
+		// TODO: Change to mark when any sector in lap shows as in pit
+		Pitted: driverTiming.InPit || driverTiming.PitOut,
+	}
+
+	foundIndex := -1
+	for i, l := range lapHistory.CompletedLaps {
+		if l.Lap == newCompletedLap.Lap {
+			foundIndex = i
+			break
+		}
+	}
+
+	if foundIndex != -1 {
+		// Lap already exists, update it with the new data
+		lapHistory.CompletedLaps[foundIndex] = newCompletedLap
+	} else {
+		lapHistory.CompletedLaps = append(lapHistory.CompletedLaps, newCompletedLap)
+		fmt.Printf("Info (applyCurrentLapToHistory): Added lap %d for driver %s.\n", newCompletedLap.Lap, driverNum)
+	}
+
+	gs.R.DriverLapHistory[driverNum] = lapHistory
+}
+
+func sumOfSectors(sectors []SectorTiming) (string, error) {
+	if len(sectors) != 3 {
+		return "", fmt.Errorf("expected 3 sectors, got %d", len(sectors))
+	}
+
+	var totalDuration time.Duration
+
+	for i, sector := range sectors {
+		if sector.Value == "" {
+			return "", fmt.Errorf("sector %d has an empty time value", i+1)
+		}
+
+		sectorDuration, err := parseTimeToDuration(sector.Value)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse time for sector %d ('%s'): %w", i+1, sector.Value, err)
+		}
+
+		totalDuration += sectorDuration
+	}
+
+	return formatDurationToLapTime(totalDuration), nil
+}
+
+func formatDurationToLapTime(d time.Duration) string {
+	totalMilliseconds := d.Milliseconds()
+
+	minutes := totalMilliseconds / (60 * 1000)
+	remainingMilliseconds := totalMilliseconds % (60 * 1000)
+	seconds := remainingMilliseconds / 1000
+	millisecondsPart := remainingMilliseconds % 1000
+
+	return fmt.Sprintf("%d:%02d.%03d", minutes, seconds, millisecondsPart)
+}
+
+// parseTimeToDuration parses a time string in "M:SS.fff" or "SS.fff" format into a duration.
+func parseTimeToDuration(timeStr string) (time.Duration, error) {
+	if timeStr == "" {
+		return 0, fmt.Errorf("empty time string")
+	}
+
+	var minutes, seconds, milliseconds int
+	var err error
+
+	// : splits mins off
+	parts := strings.Split(timeStr, ":")
+	if len(parts) == 2 {
+		if parts[0] != "" {
+			minutes, err = strconv.Atoi(parts[0])
+		}
+		if err != nil {
+			return 0, fmt.Errorf("invalid minutes in '%s': %w", timeStr, err)
+		}
+		timeStr = parts[1]
+	} else if len(parts) > 2 {
+		return 0, fmt.Errorf("invalid time format (too many colons) in '%s'", timeStr)
+	}
+
+	secMsParts := strings.Split(timeStr, ".")
+	if len(secMsParts) >= 1 && secMsParts[0] != "" {
+		seconds, err = strconv.Atoi(secMsParts[0])
+		if err != nil {
+			return 0, fmt.Errorf("invalid seconds in '%s': %w", timeStr, err)
+		}
+	} else if len(secMsParts) == 0 || (len(secMsParts) == 1 && secMsParts[0] == "") {
+		// Cases like ""
+		return 0, fmt.Errorf("missing seconds component in '%s'", timeStr)
+	}
+
+	if len(secMsParts) == 2 {
+		msStr := secMsParts[1]
+		milliseconds, err = strconv.Atoi(msStr)
+		if err != nil {
+			return 0, fmt.Errorf("invalid milliseconds in '%s': %w", timeStr, err)
+		}
+	} else if len(secMsParts) > 2 {
+		return 0, fmt.Errorf("invalid time format (too many dots) in '%s'", timeStr)
+	}
+	totalDuration := time.Duration(minutes)*time.Minute +
+		time.Duration(seconds)*time.Second +
+		time.Duration(milliseconds)*time.Millisecond
+
+	return totalDuration, nil
 }
