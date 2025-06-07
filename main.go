@@ -13,6 +13,7 @@ import (
 
 	"f1sockets/model"
 
+	ics "github.com/arran4/golang-ical"
 	"github.com/gorilla/websocket"
 )
 
@@ -25,7 +26,9 @@ const (
 )
 
 var (
-	globalState = model.NewEmptyGlobalState()
+	globalState       = model.NewEmptyGlobalState()
+	seasonSchedule    model.SeasonSchedule
+	lastScheduleFetch int64
 )
 
 type NegotiateResponse struct {
@@ -47,7 +50,7 @@ var (
 	logBuffer      = make([]string, 0, 100)
 	logBufferMutex sync.Mutex
 	logFlushTicker = time.NewTicker(2 * time.Second)
-	logFilePath    = "recordings/f1tv_events_sa_race.txt"
+	logFilePath    = "recordings/f1tv_events_spain_race.txt"
 	DEBUG          = true
 )
 
@@ -62,6 +65,8 @@ var upgrader = websocket.Upgrader{
 func main() {
 	fmt.Printf("Starting F1TV SignalR Proxy on %s\n", listenAddr)
 
+	go loadSeasonData()
+
 	// the http endpoint listening for new connections
 	http.HandleFunc("/ws", handleBrowserConnections)
 
@@ -69,6 +74,8 @@ func main() {
 	http.HandleFunc("/state", handleState)
 
 	http.HandleFunc("/apply", handleApply)
+
+	http.HandleFunc("/season", handleSeason)
 
 	// routine for connection and proxying it out
 	go manageF1TVConnection()
@@ -247,7 +254,7 @@ func manageF1TVConnection() {
 				break
 			}
 
-			fmt.Printf("Received from F1TV (%d bytes): %s\n", len(message), message)
+			// fmt.Printf("Received from F1TV (%d bytes): %s\n", len(message), message)
 
 			if DEBUG {
 				logEntry := fmt.Sprintf("[%s] %s", time.Now().Format(time.RFC3339), message)
@@ -414,6 +421,87 @@ func sendSubscribeMessage(conn *websocket.Conn) {
 		fmt.Printf("Failed to send subscribe message: %v\n", err)
 	} else {
 		fmt.Println("Subscribe message sent to F1TV.")
+	}
+}
+
+func loadSeasonData() {
+	fmt.Println("Fetching F1 season data...")
+	resp, err := http.Get("https://ics.ecal.com/ecal-sub/660897ca63f9ca0008bcbea6/Formula%201.ics")
+	if err != nil {
+		fmt.Printf("Error fetching season data: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("Error fetching season data: status code %d\n", resp.StatusCode)
+		return
+	}
+
+	cal, err := ics.ParseCalendar(resp.Body)
+	if err != nil {
+		fmt.Printf("Error parsing ICS data: %v\n", err)
+		return
+	}
+
+	seasonSchedule.Events = []model.Event{}
+
+	for _, component := range cal.Events() {
+		event := model.Event{
+			UID:         component.GetProperty(ics.ComponentPropertyUniqueId).Value,
+			Location:    component.GetProperty(ics.ComponentPropertyLocation).Value,
+			Summary:     component.GetProperty(ics.ComponentPropertySummary).Value,
+			Description: component.GetProperty(ics.ComponentPropertyDescription).Value,
+		}
+
+		dtStartProp := component.GetProperty(ics.ComponentPropertyDtStart)
+		if dtStartProp != nil {
+			startTime, err := component.GetStartAt()
+			if err == nil {
+				event.StartTime = startTime
+			} else {
+				fmt.Printf("Error parsing start time for event %s: %v\n", event.UID, err)
+			}
+		}
+
+		dtEndProp := component.GetProperty(ics.ComponentPropertyDtEnd)
+		if dtEndProp != nil {
+			endTime, err := component.GetEndAt()
+			if err == nil {
+				event.EndTime = endTime
+			} else {
+				fmt.Printf("Error parsing end time for event %s: %v\n", event.UID, err)
+			}
+		}
+		seasonSchedule.Events = append(seasonSchedule.Events, event)
+	}
+	lastScheduleFetch = time.Now().UnixMilli()
+	fmt.Printf("Successfully loaded %d F1 events.\n", len(seasonSchedule.Events))
+}
+
+func handleSeason(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if len(seasonSchedule.Events) == 0 {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Season data not yet available or failed to load."})
+		return
+	}
+
+	if time.Now().UnixMilli()-28800000 > lastScheduleFetch { // 8hr refetch
+		loadSeasonData()
+	}
+
+	err := json.NewEncoder(w).Encode(seasonSchedule)
+	if err != nil {
+		fmt.Printf("Error encoding season schedule JSON: %v\n", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 }
 
