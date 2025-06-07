@@ -3,6 +3,7 @@ package season
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -78,11 +79,14 @@ func (s *SeasonLoader) loadData() {
 
 	newSchedule := model.SeasonSchedule{Events: []model.Event{}}
 	for _, component := range cal.Events() {
+		title := component.GetProperty(ics.ComponentPropertySummary).Value
+		titleParts := strings.Split(title, " - ")
+		eventType := titleParts[len(titleParts)-1]
 		event := model.Event{
 			UID:         component.GetProperty(ics.ComponentPropertyUniqueId).Value,
 			Location:    component.GetProperty(ics.ComponentPropertyLocation).Value,
-			Summary:     component.GetProperty(ics.ComponentPropertySummary).Value,
-			Description: component.GetProperty(ics.ComponentPropertyDescription).Value,
+			Summary:     title,
+			Description: eventType,
 		}
 
 		dtStartProp := component.GetProperty(ics.ComponentPropertyDtStart)
