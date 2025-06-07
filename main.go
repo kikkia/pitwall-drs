@@ -10,28 +10,19 @@ import (
 	"sync"
 	"time"
 
-	"f1sockets/broadcaster" // Import the new packages
+	"f1sockets/broadcaster"
 	"f1sockets/f1tvclient"
 	"f1sockets/model"
 	"f1sockets/season"
 )
 
 const (
-	// f1tvBaseURL    = "https://livetiming.formula1.com/signalr" // Moved to f1tvclient
-	// clientProtocol = "1.5" // Moved to f1tvclient
-	// hubName        = "Streaming" // Moved to f1tvclient
 	listenAddr = "localhost:8080"
 )
 
 var (
 	globalState = model.NewEmptyGlobalState()
-	// seasonSchedule model.SeasonSchedule // Moved to season package
-	// scheduleMutex sync.RWMutex         // Moved to season package
 )
-
-// Moved NegotiateResponse to f1tvclient
-
-// Moved ClientManager and manager to broadcaster
 
 var (
 	logBuffer      = make([]string, 0, 100)
@@ -40,8 +31,6 @@ var (
 	logFilePath    = "recordings/f1tv_events_spain_race.txt"
 	DEBUG          = true
 )
-
-// Moved upgrader to broadcaster
 
 func main() {
 	fmt.Printf("Starting F1TV SignalR Proxy on %s\n", listenAddr)
