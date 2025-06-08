@@ -80,6 +80,8 @@ func (s *SeasonLoader) loadData() {
 	newSchedule := model.SeasonSchedule{Events: []model.Event{}}
 	for _, component := range cal.Events() {
 		title := component.GetProperty(ics.ComponentPropertySummary).Value
+		title = strings.ReplaceAll(title, " FORMULA 1", "") // Replace some of the cruft in these names
+		title = strings.ReplaceAll(title, " 2025", "")      // Replace the 2025 in the name
 		titleParts := strings.Split(title, " - ")
 		eventType := titleParts[len(titleParts)-1]
 		event := model.Event{
