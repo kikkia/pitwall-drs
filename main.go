@@ -29,7 +29,7 @@ var (
 	logBufferMutex sync.Mutex
 	logFlushTicker = time.NewTicker(2 * time.Second)
 	logFilePath    = "recordings/f1tv_events_spain_race.txt"
-	DEBUG          = true
+	RECORD_LOGS    = true
 )
 
 func main() {
@@ -42,7 +42,7 @@ func main() {
 	defer seasonLoader.Stop() // Ensure it stops on main exit
 
 	f1tvClient := f1tvclient.NewF1TVClient(func(message []byte) {
-		if DEBUG {
+		if RECORD_LOGS {
 			logEntry := fmt.Sprintf("[%s] %s", time.Now().Format(time.RFC3339), message)
 			logBufferMutex.Lock()
 			logBuffer = append(logBuffer, logEntry)
@@ -132,7 +132,7 @@ func main() {
 		}
 	})
 
-	if DEBUG {
+	if RECORD_LOGS {
 		go func() {
 			for range logFlushTicker.C {
 				logBufferMutex.Lock()

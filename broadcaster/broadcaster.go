@@ -78,3 +78,10 @@ func (b *Broadcaster) Broadcast(message []byte) {
 		}
 	}
 }
+
+// GetClientCount returns the number of currently connected WebSocket clients.
+func (b *Broadcaster) GetClientCount() int {
+	b.RLock()
+	defer b.RUnlock()
+	return len(b.clients)
+}
