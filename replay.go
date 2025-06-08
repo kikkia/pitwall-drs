@@ -21,12 +21,20 @@ const (
 	recordingFilePath = "recordings/f1tv_events_spain_race.txt"
 	startDelay        = 5 * time.Second
 
-	timestampLayout = time.RFC3339
+	timestampLayout            = time.RFC3339
+	REPORTING_MESSAGE_INTERVAL = 100
 )
 
 var (
 	timeFactor  int64 = 5
 	globalState       = model.NewEmptyGlobalState()
+
+	PROFILE_MESSAGE_HANDLER = true // Set to true to enable profiling
+
+	// Variables for message handler profiling
+	messageHandlerTotalDuration time.Duration
+	messageHandlerMessageCount  int
+	messageHandlerMutex         sync.Mutex
 )
 
 type RecordedMessage struct {
@@ -236,6 +244,11 @@ func runReplayLogic() {
 }
 
 func broadcastMessage(payload []byte) {
+	var start time.Time
+	if PROFILE_MESSAGE_HANDLER {
+		start = time.Now() // Start timing
+	}
+
 	replayManager.clientsMux.RLock()
 	defer replayManager.clientsMux.RUnlock()
 
@@ -250,6 +263,25 @@ func broadcastMessage(payload []byte) {
 		if err != nil {
 			log.Printf("Error sending message to client %s: %v. Will remove on next cycle.", client.RemoteAddr(), err)
 		}
+	}
+
+	if PROFILE_MESSAGE_HANDLER {
+		duration := time.Since(start) // Stop timing
+
+		messageHandlerMutex.Lock()
+		messageHandlerTotalDuration += duration
+		messageHandlerMessageCount++
+
+		if messageHandlerMessageCount >= REPORTING_MESSAGE_INTERVAL {
+			avgDuration := messageHandlerTotalDuration / time.Duration(messageHandlerMessageCount)
+			fmt.Printf("Message Handler Performance Report %d clients (%d messages): Total Time: %s, Average Time: %s\n",
+				len(replayManager.clients), messageHandlerMessageCount, messageHandlerTotalDuration, avgDuration)
+
+			// Reset counters
+			messageHandlerTotalDuration = 0
+			messageHandlerMessageCount = 0
+		}
+		messageHandlerMutex.Unlock()
 	}
 }
 
