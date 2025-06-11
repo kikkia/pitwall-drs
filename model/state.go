@@ -12,6 +12,49 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// LapUpdateBroadcaster defines an interface for broadcasting lap updates.
+type LapUpdateBroadcaster interface {
+	BroadcastLapHistory(driverNum string, completedLap CompletedLap)
+}
+
+// LapHistoryBroadcasterImpl is a concrete implementation of LapUpdateBroadcaster.
+type LapHistoryBroadcasterImpl struct {
+	broadcastFunc func([]byte)
+}
+
+// NewLapHistoryBroadcaster creates a new LapHistoryBroadcasterImpl with the given broadcast function.
+func NewLapHistoryBroadcaster(f func([]byte)) *LapHistoryBroadcasterImpl {
+	return &LapHistoryBroadcasterImpl{broadcastFunc: f}
+}
+
+// BroadcastLapHistory broadcasts the given lap history.
+func (b *LapHistoryBroadcasterImpl) BroadcastLapHistory(driverNum string, completedLap CompletedLap) {
+	// Create a specific message structure for lap history updates
+	// This mimics the SignalR message format for a new "LapHistory" field
+	message := map[string]interface{}{
+		"M": []map[string]interface{}{
+			{
+				"H": "Streaming",
+				"M": "feed",
+				"A": []interface{}{
+					"LapHistory",
+					map[string]interface{}{
+						"RacingNumber": driverNum,
+						"CompletedLap": completedLap, // Send only the new completed lap
+					},
+				},
+			},
+		},
+	}
+
+	jsonMessage, err := json.Marshal(message)
+	if err != nil {
+		fmt.Printf("Error marshalling lap history message: %v\n", err)
+		return
+	}
+	b.broadcastFunc(jsonMessage)
+}
+
 type Heartbeat struct {
 	UTC string `json:"Utc"`
 }
@@ -319,8 +362,9 @@ type RaceData struct {
 }
 
 type GlobalState struct {
-	R  RaceData `json:"R"`
-	mu sync.RWMutex
+	R              RaceData `json:"R"`
+	mu             sync.RWMutex
+	LapBroadcaster LapUpdateBroadcaster
 }
 
 // Intermediate struct specifically for marshalling to match F1's R object format
@@ -377,11 +421,13 @@ func NewEmptyGlobalState() *GlobalState {
 			LapCount:         &LapCount{},
 			DriverLapHistory: make(map[string]LapHistory),
 		},
+		LapBroadcaster: nil, // Will be set by NewGlobalState or main
 	}
 }
 
-func NewGlobalState(initialJsonData []byte) (*GlobalState, error) {
+func NewGlobalState(initialJsonData []byte, broadcaster LapUpdateBroadcaster) (*GlobalState, error) {
 	newState := NewEmptyGlobalState()
+	newState.LapBroadcaster = broadcaster
 
 	var topLevel map[string]json.RawMessage
 	if err := json.Unmarshal(initialJsonData, &topLevel); err != nil {
@@ -1297,6 +1343,25 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 	}
 
 	gs.R.DriverLapHistory[driverNum] = lapHistory
+
+	// Broadcast the newly completed or updated lap
+	if gs.LapBroadcaster != nil {
+		gs.LapBroadcaster.BroadcastLapHistory(driverNum, newCompletedLap)
+	}
+}
+
+// getCompletedLap retrieves a specific completed lap from the history.
+func (gs *GlobalState) getCompletedLap(driverNum string, lapNum int) (CompletedLap, bool) {
+	lapHistory, exists := gs.R.DriverLapHistory[driverNum]
+	if !exists {
+		return CompletedLap{}, false
+	}
+	for _, lap := range lapHistory.CompletedLaps {
+		if lap.Lap == lapNum {
+			return lap, true
+		}
+	}
+	return CompletedLap{}, false
 }
 
 func sumOfSectors(sectors []SectorTiming) (string, error) {

@@ -21,7 +21,8 @@ const (
 )
 
 var (
-	globalState = model.NewEmptyGlobalState()
+	globalState           *model.GlobalState
+	lapHistoryBroadcaster model.LapUpdateBroadcaster
 )
 
 var (
@@ -36,6 +37,7 @@ func main() {
 	fmt.Printf("Starting F1TV SignalR Proxy on %s\n", listenAddr)
 
 	browserBroadcaster := broadcaster.NewBroadcaster()
+	lapHistoryBroadcaster = model.NewLapHistoryBroadcaster(browserBroadcaster.Broadcast)
 
 	seasonLoader := season.NewSeasonLoader(24 * time.Hour) // Refresh data daily
 	seasonLoader.Start()
@@ -54,7 +56,7 @@ func main() {
 			// R at top level denotes a global state update message
 			if _, ok := signalRMessage["R"].(map[string]interface{}); ok {
 				var err error // shadowing the outer err is fine here
-				globalState, err = model.NewGlobalState(message)
+				globalState, err = model.NewGlobalState(message, lapHistoryBroadcaster)
 				if err != nil {
 					fmt.Printf("Failed to parse global state message: %v\n", err)
 				}
@@ -94,6 +96,13 @@ func main() {
 
 	// listen for new WebSocket connections
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		// Ensure globalState is initialized before use
+		if globalState == nil {
+			// Initialize with a dummy broadcaster if not already set
+			globalState = model.NewEmptyGlobalState()
+			globalState.LapBroadcaster = lapHistoryBroadcaster
+		}
+
 		initialState, err := globalState.GetStateAsJSON()
 		if err != nil {
 			fmt.Printf("Error retrieving initial global state: %v\n", err)
@@ -217,6 +226,10 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 						if args, argsOk := msgMap["A"].([]interface{}); argsOk {
 							// Ensure globalState is not nil before trying to update
 							if globalState != nil {
+								// Ensure the globalState has the broadcaster set for manual updates
+								if globalState.LapBroadcaster == nil {
+									globalState.LapBroadcaster = lapHistoryBroadcaster
+								}
 								err := globalState.ApplyFeedUpdate(args)
 								if err != nil {
 									fmt.Printf("Failed to apply feed update: %v\n Update Args: %v\n", err, args)

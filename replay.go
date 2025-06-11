@@ -11,9 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"f1sockets/broadcaster"
 	"f1sockets/model"
-
-	"github.com/gorilla/websocket"
 )
 
 const (
@@ -26,8 +25,14 @@ const (
 )
 
 var (
-	timeFactor  int64 = 5
-	globalState       = model.NewEmptyGlobalState()
+	timeFactor int64 = 5
+
+	globalState           *model.GlobalState
+	browserBroadcaster    *broadcaster.Broadcaster
+	lapHistoryBroadcaster model.LapUpdateBroadcaster
+
+	firstClientConnected = make(chan struct{})
+	once                 sync.Once
 
 	PROFILE_MESSAGE_HANDLER = true // Set to true to enable profiling
 
@@ -42,27 +47,14 @@ type RecordedMessage struct {
 	Payload   []byte
 }
 
-type ReplayClientManager struct {
-	clients              map[*websocket.Conn]bool
-	clientsMux           sync.RWMutex
-	firstClientConnected chan struct{}
-	once                 sync.Once
-}
-
-var replayManager = ReplayClientManager{
-	clients:              make(map[*websocket.Conn]bool),
-	firstClientConnected: make(chan struct{}),
-}
-
-var replayUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
-
 func main() {
 	log.Printf("Starting F1 Replay Server on %s", replayListenAddr)
 	log.Printf("Will replay events from: %s", recordingFilePath)
+
+	browserBroadcaster = broadcaster.NewBroadcaster()
+	lapHistoryBroadcaster = model.NewLapHistoryBroadcaster(browserBroadcaster.Broadcast)
+	globalState = model.NewEmptyGlobalState()
+	globalState.LapBroadcaster = lapHistoryBroadcaster
 
 	go runReplayLogic()
 
@@ -76,55 +68,21 @@ func main() {
 
 func handleReplayConnections(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Handling connection")
-	conn, err := replayUpgrader.Upgrade(w, r, nil)
+
+	initialState, err := globalState.GetStateAsJSON()
 	if err != nil {
-		log.Printf("Failed to upgrade replay connection: %v", err)
-		return
-	}
-	defer conn.Close()
-
-	var beginningState []byte
-	beginningState, err = globalState.GetStateAsJSON()
-	if err != nil {
-		fmt.Printf("Error retrieving global state json for initial message %s: %v\n", conn.RemoteAddr(), err)
-		return
+		fmt.Printf("Error retrieving global state json for initial message: %v\n", err)
+		initialState = nil // Proceed without initial state if there's an error
 	}
 
-	err = conn.WriteMessage(1, beginningState)
-	if err != nil {
-		fmt.Printf("Error sending global state message to browser client %s: %v\n", conn.RemoteAddr(), err)
-		return
-	}
+	// Signal that the first client has connected
+	once.Do(func() {
+		log.Println("First client connected, signaling replay start...")
+		close(firstClientConnected) // Close the channel to signal
+	})
 
-	replayManager.clientsMux.Lock()
-	replayManager.clients[conn] = true
-	isFirstClient := len(replayManager.clients) == 1
-	replayManager.clientsMux.Unlock()
-
-	log.Printf("Replay client connected: %s. Total clients: %d\n", conn.RemoteAddr(), len(replayManager.clients))
-
-	if isFirstClient {
-		replayManager.once.Do(func() {
-			log.Println("First client connected, signaling replay start...")
-			close(replayManager.firstClientConnected) // Close the channel to signal
-		})
-	}
-
-	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("Replay client read error: %v", err)
-			} else {
-				log.Printf("Replay client disconnected normally: %s", conn.RemoteAddr())
-			}
-			break
-		}
-	}
-
-	replayManager.clientsMux.Lock()
-	delete(replayManager.clients, conn)
-	log.Printf("Replay client removed: %s. Total clients: %d\n", conn.RemoteAddr(), len(replayManager.clients))
-	replayManager.clientsMux.Unlock()
+	// Use the shared broadcaster to handle the new connection
+	browserBroadcaster.HandleConnections(w, r, initialState)
 }
 
 // Parses a line from the recording file
@@ -166,7 +124,7 @@ func parseLogLine(line string) (*RecordedMessage, error) {
 
 func runReplayLogic() {
 	log.Println("Replay logic started, waiting for first client...")
-	<-replayManager.firstClientConnected // Wait for the signal
+	<-firstClientConnected // Wait for the signal
 	log.Printf("First client detected. Waiting %s before starting replay...", startDelay)
 	time.Sleep(startDelay)
 	log.Printf("Starting replay from file: %s", recordingFilePath)
@@ -205,7 +163,7 @@ func runReplayLogic() {
 	var previousTimestamp time.Time
 	firstMsg := messages[0]
 	log.Printf("Sending first message (Timestamp: %s)", firstMsg.Timestamp.Format(time.RFC3339))
-	broadcastMessage(firstMsg.Payload)
+	processAndBroadcastMessage(firstMsg.Payload)
 	previousTimestamp = firstMsg.Timestamp
 
 	raceStart, err := time.Parse(timestampLayout, "2025-06-01T22:03:36+09:00")
@@ -228,70 +186,35 @@ func runReplayLogic() {
 			delay = 0
 		}
 
-		replayManager.clientsMux.RLock()
-		replayManager.clientsMux.RUnlock()
-
 		if delay > 0 {
 			delay = time.Duration((1000 / timeFactor)) * time.Millisecond
 			time.Sleep(delay)
 		}
 
-		broadcastMessage(msg.Payload)
+		processAndBroadcastMessage(msg.Payload)
 		previousTimestamp = msg.Timestamp
 	}
 
 	log.Println("Replay finished or stopped.")
 }
 
-func broadcastMessage(payload []byte) {
+func processAndBroadcastMessage(payload []byte) {
 	var start time.Time
 	if PROFILE_MESSAGE_HANDLER {
 		start = time.Now() // Start timing
 	}
 
-	replayManager.clientsMux.RLock()
-	defer replayManager.clientsMux.RUnlock()
-
-	applyGlobalState(payload)
-
-	if len(replayManager.clients) == 0 {
-		return
-	}
-
-	for client := range replayManager.clients {
-		err := client.WriteMessage(websocket.TextMessage, payload)
-		if err != nil {
-			log.Printf("Error sending message to client %s: %v. Will remove on next cycle.", client.RemoteAddr(), err)
-		}
-	}
-
-	if PROFILE_MESSAGE_HANDLER {
-		duration := time.Since(start) // Stop timing
-
-		messageHandlerMutex.Lock()
-		messageHandlerTotalDuration += duration
-		messageHandlerMessageCount++
-
-		if messageHandlerMessageCount >= REPORTING_MESSAGE_INTERVAL {
-			avgDuration := messageHandlerTotalDuration / time.Duration(messageHandlerMessageCount)
-			fmt.Printf("Message Handler Performance Report %d clients (%d messages): Total Time: %s, Average Time: %s\n",
-				len(replayManager.clients), messageHandlerMessageCount, messageHandlerTotalDuration, avgDuration)
-
-			// Reset counters
-			messageHandlerTotalDuration = 0
-			messageHandlerMessageCount = 0
-		}
-		messageHandlerMutex.Unlock()
-	}
-}
-
-func applyGlobalState(payload []byte) {
 	var signalRMessage map[string]interface{}
 	if err := json.Unmarshal(payload, &signalRMessage); err == nil {
 		if _, ok := signalRMessage["R"].(map[string]interface{}); ok {
-			globalState, err = model.NewGlobalState(payload)
+			// For replay, we re-initialize the global state with the full R message
+			// This is different from main.go which only applies updates.
+			// We need to ensure the broadcaster is set after re-initialization.
+			newState, err := model.NewGlobalState(payload, lapHistoryBroadcaster)
 			if err != nil {
-				fmt.Printf("Failed to parse global state message: %v\n", err)
+				fmt.Printf("Failed to parse global state message during replay: %v\n", err)
+			} else {
+				globalState = newState
 			}
 		}
 		if mArray, ok := signalRMessage["M"].([]interface{}); ok {
@@ -303,10 +226,10 @@ func applyGlobalState(payload []byte) {
 								if globalState != nil {
 									err := globalState.ApplyFeedUpdate(args)
 									if err != nil {
-										fmt.Printf("Failed to apply feed update: %v\n Update Args: %v\n", err, args)
+										fmt.Printf("Failed to apply feed update during replay: %v\n Update Args: %v\n", err, args)
 									}
 								} else {
-									fmt.Println("Skipping feed update as global state is not yet initialized.")
+									fmt.Println("Skipping feed update as global state is not yet initialized in replay.")
 								}
 							}
 						}
@@ -315,6 +238,28 @@ func applyGlobalState(payload []byte) {
 			}
 		}
 	} else {
-		fmt.Printf("Failed to parse received message as JSON: %v\n", err)
+		fmt.Printf("Failed to parse received message as JSON during replay: %v\n", err)
+	}
+
+	// Broadcast the message to all connected browser clients
+	browserBroadcaster.Broadcast(payload)
+
+	if PROFILE_MESSAGE_HANDLER {
+		duration := time.Since(start) // Stop timing
+
+		messageHandlerMutex.Lock()
+		messageHandlerTotalDuration += duration
+		messageHandlerMessageCount++
+
+		if messageHandlerMessageCount >= REPORTING_MESSAGE_INTERVAL {
+			avgDuration := messageHandlerTotalDuration / time.Duration(messageHandlerMessageCount)
+			fmt.Printf("Message Handler Performance Report %d clients (%d messages): Total Time: %s, Average Time: %s\n",
+				browserBroadcaster.GetClientCount(), messageHandlerMessageCount, messageHandlerTotalDuration, avgDuration)
+
+			// Reset counters
+			messageHandlerTotalDuration = 0
+			messageHandlerMessageCount = 0
+		}
+		messageHandlerMutex.Unlock()
 	}
 }
