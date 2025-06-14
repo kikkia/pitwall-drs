@@ -335,7 +335,7 @@ type CompletedLap struct {
 	TyreCompound string         `json:Compound`  // The tyre compound used on that lap
 }
 
-type LapHistory struct {
+type DriverLapHistory struct {
 	Driver        string         `json:RacingNumber`
 	CompletedLaps []CompletedLap `json:LapHistory`
 }
@@ -354,11 +354,11 @@ type RaceData struct {
 	TimingData          *TimingData        `json:"TimingData,omitempty"`
 	TyreStintSeries     *TyreStintSeries   `json:"TyreStintSeries,omitempty"`
 
-	DriverList       map[string]DriverInfo `json:"DriverList,omitempty"`
-	CarDataZ         string                `json:"CarData.z,omitempty"`
-	PositionZ        string                `json:"Position.z,omitempty"`
-	LapCount         *LapCount             `json:LapCount,omitempty`
-	DriverLapHistory map[string]LapHistory `json:LapHistory`
+	DriverList    map[string]DriverInfo       `json:"DriverList,omitempty"`
+	CarDataZ      string                      `json:"CarData.z,omitempty"`
+	PositionZ     string                      `json:"Position.z,omitempty"`
+	LapCount      *LapCount                   `json:LapCount,omitempty`
+	LapHistoryMap map[string]DriverLapHistory `json:LapHistoryMap`
 }
 
 type GlobalState struct {
@@ -369,23 +369,23 @@ type GlobalState struct {
 
 // Intermediate struct specifically for marshalling to match F1's R object format
 type raceDataForJSON struct {
-	Heartbeat           *Heartbeat            `json:"Heartbeat,omitempty"`
-	CarDataZ            string                `json:"CarData.z,omitempty"`  // Correct tag for output
-	PositionZ           string                `json:"Position.z,omitempty"` // Correct tag for output
-	ExtrapolatedClock   *ExtrapolatedClock    `json:"ExtrapolatedClock,omitempty"`
-	TopThree            *TopThreeData         `json:"TopThree,omitempty"`
-	TimingStats         *TimingStatsData      `json:"TimingStats,omitempty"`
-	TimingAppData       *TimingAppData        `json:"TimingAppData,omitempty"`
-	WeatherData         *WeatherData          `json:"WeatherData,omitempty"`
-	TrackStatus         *TrackStatus          `json:"TrackStatus,omitempty"`
-	DriverList          map[string]DriverInfo `json:"DriverList,omitempty"`
-	RaceControlMessages *RaceControlData      `json:"RaceControlMessages,omitempty"`
-	SessionInfo         *SessionInfoData      `json:"SessionInfo,omitempty"`
-	SessionData         *SessionData          `json:"SessionData,omitempty"`
-	TimingData          *TimingData           `json:"TimingData,omitempty"`
-	TyreStintSeries     *TyreStintSeries      `json:"TyreStintSeries,omitempty"`
-	LapCount            *LapCount             `json:LapCount,omitempty`
-	DriverLapHistory    map[string]LapHistory `json:LapHistory`
+	Heartbeat           *Heartbeat                  `json:"Heartbeat,omitempty"`
+	CarDataZ            string                      `json:"CarData.z,omitempty"`  // Correct tag for output
+	PositionZ           string                      `json:"Position.z,omitempty"` // Correct tag for output
+	ExtrapolatedClock   *ExtrapolatedClock          `json:"ExtrapolatedClock,omitempty"`
+	TopThree            *TopThreeData               `json:"TopThree,omitempty"`
+	TimingStats         *TimingStatsData            `json:"TimingStats,omitempty"`
+	TimingAppData       *TimingAppData              `json:"TimingAppData,omitempty"`
+	WeatherData         *WeatherData                `json:"WeatherData,omitempty"`
+	TrackStatus         *TrackStatus                `json:"TrackStatus,omitempty"`
+	DriverList          map[string]DriverInfo       `json:"DriverList,omitempty"`
+	RaceControlMessages *RaceControlData            `json:"RaceControlMessages,omitempty"`
+	SessionInfo         *SessionInfoData            `json:"SessionInfo,omitempty"`
+	SessionData         *SessionData                `json:"SessionData,omitempty"`
+	TimingData          *TimingData                 `json:"TimingData,omitempty"`
+	TyreStintSeries     *TyreStintSeries            `json:"TyreStintSeries,omitempty"`
+	LapCount            *LapCount                   `json:LapCount,omitempty`
+	LapHistoryMap       map[string]DriverLapHistory `json:LapHistoryMap`
 }
 
 func NewEmptyGlobalState() *GlobalState {
@@ -417,9 +417,9 @@ func NewEmptyGlobalState() *GlobalState {
 				NoEntries: make([]int, 0),
 			},
 
-			DriverList:       make(map[string]DriverInfo),
-			LapCount:         &LapCount{},
-			DriverLapHistory: make(map[string]LapHistory),
+			DriverList:    make(map[string]DriverInfo),
+			LapCount:      &LapCount{},
+			LapHistoryMap: make(map[string]DriverLapHistory),
 		},
 		LapBroadcaster: nil, // Will be set by NewGlobalState or main
 	}
@@ -1173,7 +1173,7 @@ func (gs *GlobalState) GetStateAsJSON() ([]byte, error) {
 		TimingData:          gs.R.TimingData,
 		TyreStintSeries:     gs.R.TyreStintSeries,
 		LapCount:            gs.R.LapCount,
-		DriverLapHistory:    gs.R.DriverLapHistory,
+		LapHistoryMap:       gs.R.LapHistoryMap,
 	}
 
 	// Wrap the struct within the top-level "R" key map
@@ -1283,13 +1283,13 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 		return
 	}
 
-	if gs.R.DriverLapHistory == nil {
-		gs.R.DriverLapHistory = make(map[string]LapHistory)
+	if gs.R.LapHistoryMap == nil {
+		gs.R.LapHistoryMap = make(map[string]DriverLapHistory)
 	}
 
-	lapHistory, historyExists := gs.R.DriverLapHistory[driverNum]
+	lapHistory, historyExists := gs.R.LapHistoryMap[driverNum]
 	if !historyExists {
-		lapHistory = LapHistory{
+		lapHistory = DriverLapHistory{
 			Driver:        driverNum,
 			CompletedLaps: make([]CompletedLap, 0),
 		}
@@ -1342,7 +1342,7 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 		fmt.Printf("Info (applyCurrentLapToHistory): Added lap %d for driver %s.\n", newCompletedLap.Lap, driverNum)
 	}
 
-	gs.R.DriverLapHistory[driverNum] = lapHistory
+	gs.R.LapHistoryMap[driverNum] = lapHistory
 
 	// Broadcast the newly completed or updated lap
 	if gs.LapBroadcaster != nil {
@@ -1352,7 +1352,7 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 
 // getCompletedLap retrieves a specific completed lap from the history.
 func (gs *GlobalState) getCompletedLap(driverNum string, lapNum int) (CompletedLap, bool) {
-	lapHistory, exists := gs.R.DriverLapHistory[driverNum]
+	lapHistory, exists := gs.R.LapHistoryMap[driverNum]
 	if !exists {
 		return CompletedLap{}, false
 	}

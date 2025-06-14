@@ -29,7 +29,7 @@ var (
 	logBuffer      = make([]string, 0, 100)
 	logBufferMutex sync.Mutex
 	logFlushTicker = time.NewTicker(2 * time.Second)
-	logFilePath    = "recordings/f1tv_events_spain_race.txt"
+	logFilePath    = "recordings/f1tv_events_canada_prac1-2test.txt"
 	RECORD_LOGS    = true
 )
 
