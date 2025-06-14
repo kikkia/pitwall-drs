@@ -1364,6 +1364,30 @@ func (gs *GlobalState) getCompletedLap(driverNum string, lapNum int) (CompletedL
 	return CompletedLap{}, false
 }
 
+func (gs *GlobalState) GetLastSessionStatus() string {
+
+	if gs.R.SessionData == nil || gs.R.SessionData.StatusSeries == nil {
+		return ""
+	}
+
+	for i := len(gs.R.SessionData.StatusSeries) - 1; i >= 0; i-- {
+		statusChange := gs.R.SessionData.StatusSeries[i]
+		if statusChange.SessionStatus != "" {
+			return statusChange.SessionStatus
+		}
+	}
+	return ""
+}
+
+func (gs *GlobalState) IsSessionFinished() bool {
+	switch gs.GetLastSessionStatus() {
+	case "Finalised", "Ends":
+		return true
+	default:
+		return false
+	}
+}
+
 func sumOfSectors(sectors []SectorTiming) (string, error) {
 	if len(sectors) != 3 {
 		return "", fmt.Errorf("expected 3 sectors, got %d", len(sectors))

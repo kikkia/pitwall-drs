@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -26,10 +27,9 @@ var (
 )
 
 var (
-	logBuffer      = make([]string, 0, 100)
+	logBuffer      = make([]string, 0, 1000)
 	logBufferMutex sync.Mutex
 	logFlushTicker = time.NewTicker(2 * time.Second)
-	logFilePath    = "recordings/f1tv_events_canada_prac1-2test.txt"
 	RECORD_LOGS    = true
 )
 
@@ -44,7 +44,7 @@ func main() {
 	defer seasonLoader.Stop() // Ensure it stops on main exit
 
 	f1tvClient := f1tvclient.NewF1TVClient(func(message []byte) {
-		if RECORD_LOGS {
+		if RECORD_LOGS && (globalState == nil || !globalState.IsSessionFinished()) {
 			logEntry := fmt.Sprintf("[%s] %s", time.Now().Format(time.RFC3339), message)
 			logBufferMutex.Lock()
 			logBuffer = append(logBuffer, logEntry)
@@ -144,18 +144,21 @@ func main() {
 	if RECORD_LOGS {
 		go func() {
 			for range logFlushTicker.C {
+				if getRecordingFilePath() == "" {
+					fmt.Println("Filepath not yet present, skipping this logging dump")
+				}
 				logBufferMutex.Lock()
 				if len(logBuffer) > 0 {
 					toWrite := logBuffer
-					logBuffer = make([]string, 0, 100)
+					logBuffer = make([]string, 0, 1000)
 					logBufferMutex.Unlock()
 
-					f, err := ioutil.ReadFile(logFilePath)
+					f, err := ioutil.ReadFile(getRecordingFilePath())
 					if err != nil {
 						f = []byte{}
 					}
 					combined := append(f, []byte(fmt.Sprintf("%s\n", joinWithNewlines(toWrite)))...)
-					err = ioutil.WriteFile(logFilePath, combined, 0644)
+					err = ioutil.WriteFile(getRecordingFilePath(), combined, 0644)
 					if err != nil {
 						fmt.Printf("Failed to write log batch: %v\n", err)
 					}
@@ -170,6 +173,24 @@ func main() {
 	if err != nil {
 		fmt.Printf("HTTP server failed: %v\n", err)
 	}
+}
+
+func getRecordingFilePath() string {
+	if globalState == nil || globalState.R.SessionInfo == nil {
+		fmt.Println("Warning: globalState or SessionInfo is nil, cannot determine recording file path.")
+		return ""
+	}
+
+	formattedPath := formatSessionPath(globalState.R.SessionInfo.Path)
+	fullPath := "recordings/" + formattedPath + ".txt"
+
+	dir := "recordings/" + formattedPath
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		fmt.Printf("Error creating directory %s: %v\n", dir, err)
+		return ""
+	}
+
+	return fullPath
 }
 
 func handleState(w http.ResponseWriter, r *http.Request) {
@@ -250,4 +271,30 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 
 func joinWithNewlines(lines []string) string {
 	return fmt.Sprint(strings.Join(lines, "\n"))
+}
+
+// formatSessionPath takes a session path like "2025/2025-06-15_Canadian_Grand_Prix/2025-06-13_Practice_1/"
+// and transforms it to "2025/Canadian_Grand_Prix/Practice_1"
+func formatSessionPath(sessionPath string) string {
+	parts := strings.Split(sessionPath, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+
+	cleanedParts := []string{parts[0]}
+
+	for i := 1; i < len(parts); i++ {
+		part := parts[i]
+		if part == "" {
+			continue // Skip empty parts, especially if path ends with "/"
+		}
+		// Check if the part starts with a date pattern ("YYYY-MM-DD_")
+		if len(part) >= 11 && part[4] == '-' && part[7] == '-' && part[10] == '_' {
+			cleanedParts = append(cleanedParts, part[11:])
+		} else {
+			cleanedParts = append(cleanedParts, part)
+		}
+	}
+
+	return strings.Join(cleanedParts, "/")
 }
