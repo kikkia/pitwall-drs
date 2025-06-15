@@ -158,9 +158,16 @@ func main() {
 	if RECORD_LOGS {
 		go func() {
 			for range logFlushTicker.C {
+				if !f1tvClient.IsRunning() {
+					//fmt.Println("Client not connected, not logging")
+					continue
+				}
+
 				if getRecordingFilePath() == "" {
 					fmt.Println("Filepath not yet present, skipping this logging dump")
+					continue
 				}
+
 				logBufferMutex.Lock()
 				if len(logBuffer) > 0 {
 					toWrite := logBuffer
