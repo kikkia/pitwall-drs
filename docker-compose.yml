@@ -1,0 +1,8 @@
+version: '3.8'
+
+services:
+  socket-proxy:
+    build: .
+    ports:
+      - "8080:8080"
+    command: ["./socket-proxy", "--auto-connect=true"]
