@@ -30,7 +30,7 @@ type F1TVClient struct {
 	messageHandler MessageHandler
 	stopChan       chan struct{}
 	wg             sync.WaitGroup
-	isRunning      bool // In high concurrency maybe a mutex would be needed
+	isRunning      bool // In high concurrency maybe a mutex would help
 }
 
 func NewF1TVClient(handler MessageHandler) *F1TVClient {
