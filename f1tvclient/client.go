@@ -30,6 +30,7 @@ type F1TVClient struct {
 	messageHandler MessageHandler
 	stopChan       chan struct{}
 	wg             sync.WaitGroup
+	isRunning      bool // In high concurrency maybe a mutex would be needed
 }
 
 func NewF1TVClient(handler MessageHandler) *F1TVClient {
@@ -40,26 +41,45 @@ func NewF1TVClient(handler MessageHandler) *F1TVClient {
 }
 
 func (c *F1TVClient) Start() {
+	if c.isRunning {
+		return // Already running
+	}
+	c.isRunning = true
+
 	c.wg.Add(1)
 	go c.run()
 }
 
 func (c *F1TVClient) Stop() {
+	if !c.isRunning {
+		return // Not running
+	}
+	c.isRunning = false
+
 	close(c.stopChan)
 	if c.conn != nil {
 		c.conn.Close()
 	}
 	c.wg.Wait()
 	fmt.Println("F1TV Client stopped.")
+	c.stopChan = make(chan struct{}) // Re-initialize stopChan for future starts
 }
 
 func (c *F1TVClient) run() {
-	defer c.wg.Done()
+	defer func() {
+		c.isRunning = false
+		c.wg.Done()
+	}()
+
 	for {
 		select {
 		case <-c.stopChan:
 			return
 		default:
+			if !c.isRunning { // Check isRunning again in case Stop() was called while in select
+				return
+			}
+
 			fmt.Println("Attempting to connect to F1TV SignalR...")
 			token, cookie, err := negotiate()
 			if err != nil {
@@ -87,6 +107,10 @@ func (c *F1TVClient) run() {
 			time.Sleep(5 * time.Second)
 		}
 	}
+}
+
+func (c *F1TVClient) IsRunning() bool {
+	return c.isRunning
 }
 
 func (c *F1TVClient) readMessages() {

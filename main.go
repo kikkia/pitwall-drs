@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -31,9 +32,16 @@ var (
 	logBufferMutex sync.Mutex
 	logFlushTicker = time.NewTicker(2 * time.Second)
 	RECORD_LOGS    = true
+	autoConnect    = false
 )
 
+func init() {
+	flag.BoolVar(&autoConnect, "auto-connect", false, "Automatically connect/disconnect to F1TV based on session times")
+}
+
 func main() {
+	flag.Parse()
+
 	fmt.Printf("Starting F1TV SignalR Proxy on %s\n", listenAddr)
 
 	browserBroadcaster := broadcaster.NewBroadcaster()
@@ -91,8 +99,14 @@ func main() {
 		browserBroadcaster.Broadcast(message)
 	})
 
-	f1tvClient.Start()
-	defer f1tvClient.Stop()
+	if autoConnect {
+		fmt.Println("Auto-connect mode enabled. F1TV client will connect/disconnect based on session times.")
+		go manageF1TVConnection(f1tvClient, seasonLoader)
+	} else {
+		fmt.Println("Auto-connect mode disabled. F1TV client starting immediately.")
+		f1tvClient.Start()
+		defer f1tvClient.Stop()
+	}
 
 	// listen for new WebSocket connections
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -271,6 +285,42 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 
 func joinWithNewlines(lines []string) string {
 	return fmt.Sprint(strings.Join(lines, "\n"))
+}
+
+func manageF1TVConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLoader) {
+	const checkInterval = 1 * time.Minute
+	const bufferDuration = 1 * time.Hour // Connect 1hr before, disconnect 1hr after
+
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		now := time.Now()
+		schedule := loader.GetSeasonSchedule()
+
+		var activeEvent *model.Event
+		for _, event := range schedule.Events {
+			connectTime := event.StartTime.Add(-bufferDuration)
+			disconnectTime := event.EndTime.Add(bufferDuration)
+
+			if now.After(connectTime) && now.Before(disconnectTime) {
+				activeEvent = &event
+				break
+			}
+		}
+
+		if activeEvent != nil {
+			if !client.IsRunning() {
+				fmt.Printf("Session '%s' is active. Connecting to F1TV client...\n", activeEvent.Summary)
+				client.Start()
+			}
+		} else {
+			if client.IsRunning() {
+				fmt.Println("No active session. Disconnecting F1TV client...")
+				client.Stop()
+			}
+		}
+	}
 }
 
 // formatSessionPath takes a session path like "2025/2025-06-15_Canadian_Grand_Prix/2025-06-13_Practice_1/"
