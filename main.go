@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"path/filepath"
+
 	"f1sockets/broadcaster"
 	"f1sockets/f1tvclient"
 	"f1sockets/model"
@@ -205,7 +207,7 @@ func getRecordingFilePath() string {
 	formattedPath := formatSessionPath(globalState.R.SessionInfo.Path)
 	fullPath := "recordings/" + formattedPath + ".txt"
 
-	dir := "recordings/" + formattedPath
+	dir := filepath.Dir(fullPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		fmt.Printf("Error creating directory %s: %v\n", dir, err)
 		return ""
@@ -298,7 +300,7 @@ func manageF1TVConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLo
 	const checkInterval = 1 * time.Minute
 	const bufferDuration = 1 * time.Hour // Connect 1hr before, disconnect 1hr after
 
-	ticker := time.NewTicker(checkInterval)
+	ticker := time.NewTicker(checkInterval) // TODO: On start 1 min delay???
 	defer ticker.Stop()
 
 	for range ticker.C {
