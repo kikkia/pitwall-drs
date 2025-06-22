@@ -794,18 +794,6 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 
 		for driverNumber, rawDriverUpdateData := range updatePayload.Lines {
 
-			// intermediate struct to parse the driver's update data
-			type DriverTimingAppDataUpdate struct {
-				Line   *int                       `json:"Line,omitempty"`
-				Stints map[string]json.RawMessage `json:"Stints,omitempty"`
-			}
-
-			var driverUpdate DriverTimingAppDataUpdate
-			if err := json.Unmarshal(rawDriverUpdateData, &driverUpdate); err != nil {
-				fmt.Printf("Warning: Failed to unmarshal partial TimingAppData update for driver %s: %v. Update data: %s\n", driverNumber, err, string(rawDriverUpdateData))
-				continue
-			}
-
 			existingAppData, found := gs.R.TimingAppData.Lines[driverNumber]
 			if !found {
 				existingAppData = DriverTimingAppData{
@@ -815,57 +803,68 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 				fmt.Printf("Info: Creating new TimingAppData entry for driver %s during update.\n", driverNumber)
 			}
 
-			if driverUpdate.Line != nil {
-				existingAppData.Line = *driverUpdate.Line
+			lineResult := gjson.Get(string(rawDriverUpdateData), "Line")
+			if lineResult.Exists() && lineResult.Type == gjson.Number {
+				existingAppData.Line = int(lineResult.Int())
 			}
 
-			if driverUpdate.Stints != nil {
-				if existingAppData.Stints == nil {
-					existingAppData.Stints = make([]StintInfo, 0)
-				}
+			stintsResult := gjson.Get(string(rawDriverUpdateData), "Stints")
 
-				// key is string index "0", "1" :/
-				for stintKey, rawStintData := range driverUpdate.Stints {
-					stintIndex, err := strconv.Atoi(stintKey)
-					if err != nil {
-						fmt.Printf("Warning: Invalid non-integer key '%s' in TimingAppData Stints update for driver %s.\n", stintKey, driverNumber)
-						continue
-					}
-
-					if stintIndex < 0 {
-						fmt.Printf("Warning: Invalid negative index %d in TimingAppData Stints update for driver %s.\n", stintIndex, driverNumber)
-						continue
-					}
-
-					// Update an existing stint
-					if stintIndex < len(existingAppData.Stints) {
-						existingStint := &existingAppData.Stints[stintIndex]
-						// Unmarshal the partial update data into the existing stint struct
-						if err := json.Unmarshal(rawStintData, existingStint); err != nil {
-							fmt.Printf("Warning: Failed to merge TimingAppData stint update at index %d for driver %s: %v. Stint data: %s\n", stintIndex, driverNumber, err, string(rawStintData))
-						}
-						// Append a new stint
-					} else if stintIndex == len(existingAppData.Stints) {
-						var newStint StintInfo
-						// Unmarshal the update data into a new stint struct
-						if err := json.Unmarshal(rawStintData, &newStint); err != nil {
-							fmt.Printf("Warning: Failed to unmarshal new TimingAppData stint at index %d for driver %s: %v. Stint data: %s\n", stintIndex, driverNumber, err, string(rawStintData))
-							continue // Skip appending if unmarshal fails
-						}
-						existingAppData.Stints = append(existingAppData.Stints, newStint)
+			if stintsResult.Exists() {
+				if stintsResult.IsArray() {
+					// Case 1: Stints is an array (initial full update)
+					var newStints []StintInfo
+					if err := json.Unmarshal([]byte(stintsResult.Raw), &newStints); err != nil {
+						fmt.Printf("Warning: Failed to unmarshal TimingAppData Stints as array for driver %s: %v. Stints data: %s\n", driverNumber, err, stintsResult.Raw)
 					} else {
-						fmt.Printf("Warning: Out-of-order stint index %d (slice length %d) in TimingAppData update for driver %s. Appending anyway.\n", stintIndex, len(existingAppData.Stints), driverNumber)
-						var newStint StintInfo
-						if err := json.Unmarshal(rawStintData, &newStint); err == nil {
-							// If we get a gap in stints, then just fill the gap with blanks
-							for i := len(existingAppData.Stints); i < stintIndex; i++ {
+						existingAppData.Stints = newStints // Replace existing stints with the new array
+					}
+				} else if stintsResult.IsObject() {
+					// Case 2: Stints is an object (partial updates keyed by index)
+					var stintUpdates map[string]json.RawMessage
+					if err := json.Unmarshal([]byte(stintsResult.Raw), &stintUpdates); err != nil {
+						fmt.Printf("Warning: Failed to unmarshal TimingAppData Stints as map for driver %s: %v. Stints data: %s\n", driverNumber, err, stintsResult.Raw)
+					} else {
+						if existingAppData.Stints == nil {
+							existingAppData.Stints = make([]StintInfo, 0)
+						}
+
+						maxIndex := -1
+						for k := range stintUpdates {
+							idx, err := strconv.Atoi(k)
+							if err == nil && idx > maxIndex {
+								maxIndex = idx
+							}
+						}
+
+						requiredSize := maxIndex + 1
+						if requiredSize > 0 && len(existingAppData.Stints) < requiredSize {
+							// Append empty structs to reach the required size
+							for i := len(existingAppData.Stints); i < requiredSize; i++ {
 								existingAppData.Stints = append(existingAppData.Stints, StintInfo{})
 							}
-							existingAppData.Stints = append(existingAppData.Stints, newStint)
-						} else {
-							fmt.Printf("Warning: Failed to unmarshal out-of-order TimingAppData stint at index %d for driver %s: %v. Stint data: %s\n", stintIndex, driverNumber, err, string(rawStintData))
+						}
+
+						for stintKey, rawStintData := range stintUpdates {
+							stintIndex, err := strconv.Atoi(stintKey)
+							if err != nil {
+								fmt.Printf("Warning: Invalid non-integer key '%s' in TimingAppData Stints update for driver %s.\n", stintKey, driverNumber)
+								continue
+							}
+
+							if stintIndex < 0 || stintIndex >= len(existingAppData.Stints) {
+								fmt.Printf("Warning: Stint index %d out of bounds (slice length %d) in TimingAppData update for driver %s.\n", stintIndex, len(existingAppData.Stints), driverNumber)
+								continue
+							}
+
+							existingStint := &existingAppData.Stints[stintIndex]
+							if err := json.Unmarshal(rawStintData, existingStint); err != nil {
+								fmt.Printf("Warning: Failed to merge TimingAppData stint update at index %d for driver %s: %v. Stint data: %s\n", stintIndex, driverNumber, err, string(rawStintData))
+							}
 						}
 					}
+				} else {
+					fmt.Printf("Warning: TimingAppData Stints field for driver %s is neither array nor object. Type: %s, Data: %s\n", driverNumber, stintsResult.Type.String(), stintsResult.Raw)
 				}
 			}
 
@@ -1140,7 +1139,7 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		// fmt.Printf("Processed TimingData update.\n")
 
 	case "TyreStintSeries":
-		// TODO
+		// TODO: E.g {"Stints":{"81":{"0":{"TotalLaps":1}}}}
 		return nil
 
 	default:
@@ -1318,12 +1317,15 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 	}
 	fmt.Printf("Calculated laptime for %s: %s\n", driverNum, lapTime)
 
+	driverStints := gs.R.TimingAppData.Lines[driverNum].Stints
+
 	newCompletedLap := CompletedLap{
 		Lap:     driverTiming.NumberOfLaps,
 		LapTime: lapTime,
 		Sectors: currentSectors,
 		// TODO: Change to mark when any sector in lap shows as in pit
-		Pitted: driverTiming.InPit || driverTiming.PitOut,
+		Pitted:       driverTiming.InPit || driverTiming.PitOut,
+		TyreCompound: driverStints[len(driverStints)-1].Compound,
 	}
 
 	foundIndex := -1
