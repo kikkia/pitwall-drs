@@ -49,9 +49,9 @@ func main() {
 	browserBroadcaster := broadcaster.NewBroadcaster()
 	lapHistoryBroadcaster = model.NewLapHistoryBroadcaster(browserBroadcaster.Broadcast)
 
-	seasonLoader := season.NewSeasonLoader(24 * time.Hour) // Refresh data daily
+	seasonLoader := season.NewSeasonLoader(24 * time.Hour)
 	seasonLoader.Start()
-	defer seasonLoader.Stop() // Ensure it stops on main exit
+	defer seasonLoader.Stop(
 
 	f1tvClient := f1tvclient.NewF1TVClient(func(message []byte) {
 		if RECORD_LOGS && (globalState == nil || !globalState.IsSessionFinished()) {
@@ -65,7 +65,7 @@ func main() {
 		if err := json.Unmarshal(message, &signalRMessage); err == nil {
 			// R at top level denotes a global state update message
 			if _, ok := signalRMessage["R"].(map[string]interface{}); ok {
-				var err error // shadowing the outer err is fine here
+				var err error 
 				globalState, err = model.NewGlobalState(message, lapHistoryBroadcaster)
 				if err != nil {
 					fmt.Printf("Failed to parse global state message: %v\n", err)
@@ -78,7 +78,6 @@ func main() {
 						if hub, hubOk := msgMap["H"].(string); hubOk && hub == "Streaming" {
 							if method, methodOk := msgMap["M"].(string); methodOk && method == "feed" {
 								if args, argsOk := msgMap["A"].([]interface{}); argsOk {
-									// Ensure globalState is not nil before trying to update
 									if globalState != nil {
 										err := globalState.ApplyFeedUpdate(args)
 										if err != nil {
@@ -97,7 +96,6 @@ func main() {
 			fmt.Printf("Failed to parse received message as JSON: %v\n", err)
 		}
 
-		// Broadcast the message to all connected browser clients
 		browserBroadcaster.Broadcast(message)
 	})
 
@@ -110,9 +108,7 @@ func main() {
 		defer f1tvClient.Stop()
 	}
 
-	// listen for new WebSocket connections
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		// Ensure globalState is initialized before use
 		if globalState == nil {
 			// Initialize with a dummy broadcaster if not already set
 			globalState = model.NewEmptyGlobalState()
@@ -122,17 +118,15 @@ func main() {
 		initialState, err := globalState.GetStateAsJSON()
 		if err != nil {
 			fmt.Printf("Error retrieving initial global state: %v\n", err)
-			initialState = nil // Proceed without initial state if there's an error
+			initialState = nil 
 		}
 		browserBroadcaster.HandleConnections(w, r, initialState)
 	})
 
-	// HTTP endpoint to serve the latest DriverList data
 	http.HandleFunc("/state", handleState)
 
 	http.HandleFunc("/apply", handleApply)
 
-	// Serve season data
 	http.HandleFunc("/season", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
