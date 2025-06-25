@@ -51,7 +51,7 @@ func main() {
 
 	seasonLoader := season.NewSeasonLoader(24 * time.Hour)
 	seasonLoader.Start()
-	defer seasonLoader.Stop(
+	defer seasonLoader.Stop()
 
 	f1tvClient := f1tvclient.NewF1TVClient(func(message []byte) {
 		if RECORD_LOGS && (globalState == nil || !globalState.IsSessionFinished()) {
@@ -65,7 +65,7 @@ func main() {
 		if err := json.Unmarshal(message, &signalRMessage); err == nil {
 			// R at top level denotes a global state update message
 			if _, ok := signalRMessage["R"].(map[string]interface{}); ok {
-				var err error 
+				var err error
 				globalState, err = model.NewGlobalState(message, lapHistoryBroadcaster)
 				if err != nil {
 					fmt.Printf("Failed to parse global state message: %v\n", err)
@@ -118,7 +118,7 @@ func main() {
 		initialState, err := globalState.GetStateAsJSON()
 		if err != nil {
 			fmt.Printf("Error retrieving initial global state: %v\n", err)
-			initialState = nil 
+			initialState = nil
 		}
 		browserBroadcaster.HandleConnections(w, r, initialState)
 	})

@@ -1137,9 +1137,48 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 			gs.R.TimingData.Lines[driverNumber] = existingDriverData
 		}
 		// fmt.Printf("Processed TimingData update.\n")
-
 	case "TyreStintSeries":
-		// TODO: E.g {"Stints":{"81":{"0":{"TotalLaps":1}}}}
+		type TyreStintSeriesUpdatePayload struct {
+			Stints map[string]map[string]TyreStint `json:"Stints"`
+		}
+
+		var updatePayload TyreStintSeriesUpdatePayload
+		if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
+			fmt.Printf("Warning: Failed to unmarshal TyreStintSeries payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
+			return nil
+		}
+
+		if gs.R.TyreStintSeries == nil {
+			gs.R.TyreStintSeries = &TyreStintSeries{Stints: make(map[string][]TyreStint)}
+		}
+		if gs.R.TyreStintSeries.Stints == nil {
+			gs.R.TyreStintSeries.Stints = make(map[string][]TyreStint)
+		}
+
+		for driverNumber, stintUpdates := range updatePayload.Stints {
+			existingStints, found := gs.R.TyreStintSeries.Stints[driverNumber]
+			if !found {
+				existingStints = make([]TyreStint, 0)
+				fmt.Printf("Info: Creating new TyreStintSeries entry for driver %s during update.\n", driverNumber)
+			}
+
+			// Convert map[string]TyreStint to map[string]json.RawMessage for applyMapUpdatesToSlice
+			rawStintUpdates := make(map[string]json.RawMessage)
+			for stintKey, stintData := range stintUpdates {
+				rawBytes, err := json.Marshal(stintData)
+				if err != nil {
+					fmt.Printf("Warning: Failed to marshal TyreStint data for driver %s, stint %s: %v\n", driverNumber, stintKey, err)
+					continue
+				}
+				rawStintUpdates[stintKey] = rawBytes
+			}
+
+			if err := applyMapUpdatesToSlice(&existingStints, rawStintUpdates); err != nil {
+				fmt.Printf("Warning: Error applying TyreStint updates for driver %s: %v\n", driverNumber, err)
+			}
+
+			gs.R.TyreStintSeries.Stints[driverNumber] = existingStints
+		}
 		return nil
 
 	default:
@@ -1320,7 +1359,7 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 	driverStints := gs.R.TimingAppData.Lines[driverNum].Stints
 
 	newCompletedLap := CompletedLap{
-		Lap:     driverTiming.NumberOfLaps,
+		Lap:     driverTiming.NumberOfLaps + 1,
 		LapTime: lapTime,
 		Sectors: currentSectors,
 		// TODO: Change to mark when any sector in lap shows as in pit
