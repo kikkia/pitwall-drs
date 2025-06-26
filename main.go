@@ -124,7 +124,7 @@ func main() {
 
 	http.HandleFunc("/state", handleState)
 
-	http.HandleFunc("/apply", handleApply)
+	// http.HandleFunc("/apply", handleApply)
 
 	http.HandleFunc("/season", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

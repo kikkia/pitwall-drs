@@ -1231,7 +1231,7 @@ func applyMapUpdatesToSlice(targetSlicePtr interface{}, updateMap map[string]jso
 	itemType := sliceVal.Type().Elem() // Get the type of the slice elements (T)
 
 	if sliceVal.IsNil() {
-		sliceVal.Set(reflect.MakeSlice(sliceVal.Type(), 0, len(updateMap))) // Make slice of correct type
+		sliceVal.Set(reflect.MakeSlice(sliceVal.Type(), 0, len(updateMap)))
 	}
 
 	maxIndex := -1
@@ -1282,8 +1282,8 @@ func applyMapUpdatesToSlice(targetSlicePtr interface{}, updateMap map[string]jso
 
 			if len(segmentWrapper.Segments) > 0 {
 				// Get pointer to the actual Segments slice within the SectorTiming struct
-				sectorElement := sliceVal.Index(index)                                       // Get the SectorTiming struct value
-				segmentsSlicePtr := sectorElement.FieldByName("Segments").Addr().Interface() // Get *[]SegmentStatus
+				sectorElement := sliceVal.Index(index)
+				segmentsSlicePtr := sectorElement.FieldByName("Segments").Addr().Interface()
 
 				// Recursively apply map updates to the segments slice
 				err := applyMapUpdatesToSlice(segmentsSlicePtr, segmentWrapper.Segments)
@@ -1377,20 +1377,6 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 	if gs.LapBroadcaster != nil {
 		gs.LapBroadcaster.BroadcastLapHistory(driverNum, newCompletedLap)
 	}
-}
-
-// getCompletedLap retrieves a specific completed lap from the history.
-func (gs *GlobalState) getCompletedLap(driverNum string, lapNum int) (CompletedLap, bool) {
-	lapHistory, exists := gs.R.LapHistoryMap[driverNum]
-	if !exists {
-		return CompletedLap{}, false
-	}
-	for _, lap := range lapHistory.CompletedLaps {
-		if lap.Lap == lapNum {
-			return lap, true
-		}
-	}
-	return CompletedLap{}, false
 }
 
 func (gs *GlobalState) GetLastSessionStatus() string {
