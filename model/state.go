@@ -1303,13 +1303,6 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 		return
 	}
 
-	if driverTiming.NumberOfLaps <= 0 {
-		// TODO: change up to more relevant debug
-		fmt.Printf("Info (saveLapToHistory): No valid last lap time to record for driver %s (Lap: %d, Time: '%s').\n",
-			driverNum, driverTiming.LastLapTime.Lap, driverTiming.LastLapTime.Value)
-		return
-	}
-
 	if gs.R.LapHistoryMap == nil {
 		gs.R.LapHistoryMap = make(map[string]DriverLapHistory)
 	}
