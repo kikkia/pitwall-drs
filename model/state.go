@@ -293,7 +293,7 @@ type SectorTiming struct {
 }
 
 type SegmentStatus struct {
-	Status int `json:"Status"` // Todo: Map
+	Status int `json:"Status"` // 2064=pit 2051=OB 2049=PB 0=stopped 2048=set
 }
 
 type SpeedsTimingMap struct {
@@ -1333,6 +1333,8 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 		}
 	}
 
+	hasPitted := driverTiming.InPit || driverTiming.PitOut
+
 	currentSectors := make([]SectorTiming, len(driverTiming.Sectors))
 	if len(driverTiming.Sectors) > 0 {
 		for i, s := range driverTiming.Sectors {
@@ -1340,6 +1342,11 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 
 			if len(s.Segments) > 0 {
 				copiedSector.Segments = make([]SegmentStatus, len(s.Segments))
+				for _, seg := range s.Segments {
+					if seg.Status == 2064 {
+						hasPitted = true
+					}
+				}
 				copy(copiedSector.Segments, s.Segments)
 			} else {
 				copiedSector.Segments = make([]SegmentStatus, 0)
@@ -1359,11 +1366,10 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 	driverStints := gs.R.TimingAppData.Lines[driverNum].Stints
 
 	newCompletedLap := CompletedLap{
-		Lap:     driverTiming.NumberOfLaps + 1,
-		LapTime: lapTime,
-		Sectors: currentSectors,
-		// TODO: Change to mark when any sector in lap shows as in pit
-		Pitted:       driverTiming.InPit || driverTiming.PitOut,
+		Lap:          driverTiming.NumberOfLaps + 1,
+		LapTime:      lapTime,
+		Sectors:      currentSectors,
+		Pitted:       hasPitted,
 		TyreCompound: driverStints[len(driverStints)-1].Compound,
 	}
 
