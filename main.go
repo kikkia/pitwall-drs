@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	listenAddr = "localhost:8080"
+	listenAddr = ":8080"
 )
 
 var (
