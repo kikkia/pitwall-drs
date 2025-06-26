@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
@@ -170,15 +169,22 @@ func main() {
 					logBuffer = make([]string, 0, 1000)
 					logBufferMutex.Unlock()
 
-					f, err := ioutil.ReadFile(getRecordingFilePath())
-					if err != nil {
-						f = []byte{}
+					filePath := getRecordingFilePath()
+					if filePath == "" {
+						fmt.Println("Filepath not yet present, skipping this logging dump")
+						continue
 					}
-					combined := append(f, []byte(fmt.Sprintf("%s\n", joinWithNewlines(toWrite)))...)
-					err = ioutil.WriteFile(getRecordingFilePath(), combined, 0644)
+
+					f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 					if err != nil {
+						fmt.Printf("Failed to open log file for appending: %v\n", err)
+						continue
+					}
+
+					if _, err := f.WriteString(joinWithNewlines(toWrite)); err != nil {
 						fmt.Printf("Failed to write log batch: %v\n", err)
 					}
+					f.Close()
 				} else {
 					logBufferMutex.Unlock()
 				}

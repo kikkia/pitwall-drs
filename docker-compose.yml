@@ -5,4 +5,9 @@ services:
     build: .
     ports:
       - "8080:8080"
+    volumes:
+      - socket-proxy-recordings:/app/recordings
     command: ["./socket-proxy", "--auto-connect=true"]
+
+volumes:
+  socket-proxy-recordings:
