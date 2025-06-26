@@ -1139,7 +1139,7 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		// fmt.Printf("Processed TimingData update.\n")
 	case "TyreStintSeries":
 		type TyreStintSeriesUpdatePayload struct {
-			Stints map[string]map[string]TyreStint `json:"Stints"`
+			Stints map[string]map[string]json.RawMessage `json:"Stints"`
 		}
 
 		var updatePayload TyreStintSeriesUpdatePayload
@@ -1162,18 +1162,7 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 				fmt.Printf("Info: Creating new TyreStintSeries entry for driver %s during update.\n", driverNumber)
 			}
 
-			// Convert map[string]TyreStint to map[string]json.RawMessage for applyMapUpdatesToSlice
-			rawStintUpdates := make(map[string]json.RawMessage)
-			for stintKey, stintData := range stintUpdates {
-				rawBytes, err := json.Marshal(stintData)
-				if err != nil {
-					fmt.Printf("Warning: Failed to marshal TyreStint data for driver %s, stint %s: %v\n", driverNumber, stintKey, err)
-					continue
-				}
-				rawStintUpdates[stintKey] = rawBytes
-			}
-
-			if err := applyMapUpdatesToSlice(&existingStints, rawStintUpdates); err != nil {
+			if err := applyMapUpdatesToSlice(&existingStints, stintUpdates); err != nil {
 				fmt.Printf("Warning: Error applying TyreStint updates for driver %s: %v\n", driverNumber, err)
 			}
 
