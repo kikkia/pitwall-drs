@@ -531,8 +531,6 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		return fmt.Errorf("failed to marshal update payload for field '%s': %w", fieldName, err)
 	}
 
-	// fmt.Printf("Applying update for field: %s, Payload: %s\n", fieldName, string(payloadBytes))
-
 	// TODO: Clean this up man jesus
 	switch fieldName {
 	case "CarData.z":
@@ -541,7 +539,6 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 			return fmt.Errorf("failed to unmarshal CarData.z payload: %w", err)
 		}
 		gs.R.CarDataZ = data
-		// fmt.Printf("Updated CarData.z\n")
 
 	case "Position.z":
 		var data string
@@ -549,7 +546,6 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 			return fmt.Errorf("failed to unmarshal Position.z payload: %w", err)
 		}
 		gs.R.PositionZ = data
-		// fmt.Printf("Updated Position.z\n")
 
 	case "Heartbeat":
 		if gs.R.Heartbeat == nil {
@@ -600,6 +596,7 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		}
 
 		// Annoying, so annoying
+		// They send 1 extra field thats not a drive but will still unmarshal to one
 		delete(driverUpdates, "_kf")
 
 		if gs.R.DriverList == nil {
@@ -717,7 +714,9 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		for driverNumber, rawDriverUpdateData := range updatePayload.Lines {
 			existingStats, found := gs.R.TimingStats.Lines[driverNumber]
 			if !found {
-				existingStats = DriverTimingStats{}
+				existingStats = DriverTimingStats{
+					BestSectors: make([]SectorOrSpeedInfo, 3),
+				}
 				fmt.Printf("Info: Creating new TimingStats entry for driver %s during update.\n", driverNumber)
 			}
 
@@ -813,11 +812,12 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 			if stintsResult.Exists() {
 				if stintsResult.IsArray() {
 					// Case 1: Stints is an array (initial full update)
+					// Simple unmarshal and replace
 					var newStints []StintInfo
 					if err := json.Unmarshal([]byte(stintsResult.Raw), &newStints); err != nil {
 						fmt.Printf("Warning: Failed to unmarshal TimingAppData Stints as array for driver %s: %v. Stints data: %s\n", driverNumber, err, stintsResult.Raw)
 					} else {
-						existingAppData.Stints = newStints // Replace existing stints with the new array
+						existingAppData.Stints = newStints
 					}
 				} else if stintsResult.IsObject() {
 					// Case 2: Stints is an object (partial updates keyed by index)
@@ -1025,7 +1025,7 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 
 	case "TimingData":
 		type TimingDataUpdatePayload struct {
-			NoEntries   []int                      `json:"NoEntries,omitempty"` // Assumes replacement if present
+			NoEntries   []int                      `json:"NoEntries,omitempty"`
 			SessionPart *int                       `json:"SessionPart,omitempty"`
 			Lines       map[string]json.RawMessage `json:"Lines"` // Keep Lines as raw for later processing
 		}
@@ -1098,8 +1098,6 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 					fmt.Printf("Warning: Error applying Sectors/Segments updates for driver %s: %v\n", driverNumber, err)
 				}
 
-				// TODO: Also record this sector time / segment into their lap history
-
 				// If its the last sector finishing then we will add the current timing details as a new
 				// lap to the history
 				sector, exists := sliceUpdates.Sectors["2"]
@@ -1116,7 +1114,7 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 				Deleted []string `json:"_deleted"`
 			}
 			var deletionHint DeletionHint
-			// Unmarshal *again* just to check for _deleted hint
+			// Unmarshal again :/ just to check for _deleted hint
 			_ = json.Unmarshal(rawDriverUpdateData, &deletionHint)
 
 			if len(deletionHint.Deleted) > 0 {

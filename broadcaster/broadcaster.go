@@ -27,6 +27,8 @@ func NewBroadcaster() *Broadcaster {
 	}
 }
 
+// Handles the initial websocket request and then the connection
+// TODO: add some ratelimiting function on a per ip basis.
 func (b *Broadcaster) HandleConnections(w http.ResponseWriter, r *http.Request, initialMessage []byte) {
 	conn, err := b.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -66,6 +68,7 @@ func (b *Broadcaster) HandleConnections(w http.ResponseWriter, r *http.Request, 
 	fmt.Printf("Browser client removed: %s. Total clients: %d\n", conn.RemoteAddr(), len(b.clients))
 }
 
+// Broadcast a given message to all connected clients
 func (b *Broadcaster) Broadcast(message []byte) {
 	b.RLock()
 	defer b.RUnlock()
