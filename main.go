@@ -54,7 +54,7 @@ func main() {
 
 	f1tvClient := f1tvclient.NewF1TVClient(func(message []byte) {
 		if RECORD_LOGS && (globalState == nil || !globalState.IsSessionFinished()) {
-			logEntry := fmt.Sprintf("[%s] %s", time.Now().Format(time.RFC3339), message)
+			logEntry := fmt.Sprintf("[%s] %s\n", time.Now().Format(time.RFC3339), message)
 			logBufferMutex.Lock()
 			logBuffer = append(logBuffer, logEntry)
 			logBufferMutex.Unlock()
@@ -321,6 +321,8 @@ func manageF1TVConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLo
 		if activeEvent != nil {
 			if !client.IsRunning() {
 				fmt.Printf("Session '%s' is active. Connecting to F1TV client...\n", activeEvent.Summary)
+				// Clear state to make way for new connection
+
 				client.Start()
 			}
 		} else {
