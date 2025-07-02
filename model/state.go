@@ -292,6 +292,14 @@ type SectorTiming struct {
 	PreviousValue   string          `json:"PreviousValue,omitempty"` // Store previous value for comparison
 }
 
+const (
+	SegmentStatusSet     = 2048
+	SegmentStatusPB      = 2049
+	SegmentStatusOB      = 2051
+	SegmentStatusPit     = 2064
+	SegmentStatusStopped = 0
+)
+
 type SegmentStatus struct {
 	Status int `json:"Status"` // 2064=pit 2051=OB 2049=PB 0=stopped 2048=set
 }
@@ -531,7 +539,6 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		return fmt.Errorf("failed to marshal update payload for field '%s': %w", fieldName, err)
 	}
 
-	// TODO: Clean this up man jesus
 	switch fieldName {
 	case "CarData.z":
 		var data string
@@ -539,14 +546,12 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 			return fmt.Errorf("failed to unmarshal CarData.z payload: %w", err)
 		}
 		gs.R.CarDataZ = data
-
 	case "Position.z":
 		var data string
 		if err := json.Unmarshal(payloadBytes, &data); err != nil {
 			return fmt.Errorf("failed to unmarshal Position.z payload: %w", err)
 		}
 		gs.R.PositionZ = data
-
 	case "Heartbeat":
 		if gs.R.Heartbeat == nil {
 			gs.R.Heartbeat = &Heartbeat{}
@@ -554,7 +559,6 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		if err := json.Unmarshal(payloadBytes, gs.R.Heartbeat); err != nil {
 			return fmt.Errorf("failed to unmarshal Heartbeat payload: %w", err)
 		}
-
 	case "ExtrapolatedClock":
 		if gs.R.ExtrapolatedClock == nil {
 			gs.R.ExtrapolatedClock = &ExtrapolatedClock{}
@@ -562,7 +566,6 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		if err := json.Unmarshal(payloadBytes, gs.R.ExtrapolatedClock); err != nil {
 			return fmt.Errorf("failed to unmarshal ExtrapolatedClock payload: %w", err)
 		}
-
 	case "WeatherData":
 		if gs.R.WeatherData == nil {
 			gs.R.WeatherData = &WeatherData{}
@@ -570,7 +573,6 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		if err := json.Unmarshal(payloadBytes, gs.R.WeatherData); err != nil {
 			return fmt.Errorf("failed to unmarshal WeatherData payload: %w", err)
 		}
-
 	case "TrackStatus":
 		if gs.R.TrackStatus == nil {
 			gs.R.TrackStatus = &TrackStatus{}
@@ -578,341 +580,23 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		if err := json.Unmarshal(payloadBytes, gs.R.TrackStatus); err != nil {
 			return fmt.Errorf("failed to unmarshal TrackStatus payload: %w", err)
 		}
-
 	case "LapCount":
 		if gs.R.LapCount == nil {
 			gs.R.LapCount = &LapCount{}
 		}
 		if err := json.Unmarshal(payloadBytes, gs.R.LapCount); err != nil {
-			return fmt.Errorf("failed to unmarshal TrackStatus payload: %w", err)
+			return fmt.Errorf("failed to unmarshal LapCount payload: %w", err)
 		}
-
 	case "DriverList":
-		// Unmarshal the update payload into a map where keys are driver numbers
-		// and values are the raw JSON containing the fields to update (e.g., {"Line": 2}).
-		var driverUpdates map[string]json.RawMessage
-		if err := json.Unmarshal(payloadBytes, &driverUpdates); err != nil {
-			return fmt.Errorf("failed to unmarshal DriverList update payload into map: %w", err)
-		}
-
-		// Annoying, so annoying
-		// They send 1 extra field thats not a drive but will still unmarshal to one
-		delete(driverUpdates, "_kf")
-
-		if gs.R.DriverList == nil {
-			gs.R.DriverList = make(map[string]DriverInfo)
-			fmt.Println("Warning: DriverList was nil during update. Initialized empty map.")
-		}
-
-		for driverNumber, rawUpdateData := range driverUpdates {
-			existingInfo, found := gs.R.DriverList[driverNumber]
-			if found {
-				if err := json.Unmarshal(rawUpdateData, &existingInfo); err != nil {
-					// Log error for this specific driver update but continue with others
-					fmt.Printf("Warning: Failed to apply partial DriverList update for driver %s: %v. Update data: %s\n", driverNumber, err, string(rawUpdateData))
-					continue
-				}
-				// We have to restore this in the map, we edited a copy technically
-				gs.R.DriverList[driverNumber] = existingInfo
-				// fmt.Printf("Updated DriverList for driver %s: Line=%d\n", driverNumber, existingInfo.Line)
-			} else {
-				fmt.Printf("Warning: Received DriverList update for driver %s who is not in the current state. Update data: %s\n", driverNumber, string(rawUpdateData))
-			}
-		}
-
+		return gs.updateDriverList(payloadBytes)
 	case "TopThree":
-		type TopThreeUpdatePayload struct {
-			Lines       map[string]json.RawMessage `json:"Lines"`
-			SessionPart *int                       `json:"SessionPart,omitempty"`
-			Withheld    *bool                      `json:"Withheld,omitempty"`
-		}
-
-		var updatePayload TopThreeUpdatePayload
-		if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
-			fmt.Printf("Warning: Failed to unmarshal TopThree payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
-			return nil
-		}
-
-		if gs.R.TopThree == nil {
-			gs.R.TopThree = &TopThreeData{Lines: make([]TopThreeLine, 0)}
-		}
-
-		if updatePayload.SessionPart != nil {
-			gs.R.TopThree.SessionPart = *updatePayload.SessionPart
-		}
-		if updatePayload.Withheld != nil {
-			gs.R.TopThree.Withheld = *updatePayload.Withheld
-		}
-
-		maxIndex := -1
-		keysToProcess := make([]string, 0, len(updatePayload.Lines))
-		for k := range updatePayload.Lines {
-			keysToProcess = append(keysToProcess, k)
-			idx, err := strconv.Atoi(k)
-			if err == nil && idx > maxIndex {
-				maxIndex = idx
-			}
-		}
-		requiredSize := maxIndex + 1
-		if requiredSize > 0 && len(gs.R.TopThree.Lines) < requiredSize {
-			// Append empty structs to reach the required size
-			for i := len(gs.R.TopThree.Lines); i < requiredSize; i++ {
-				gs.R.TopThree.Lines = append(gs.R.TopThree.Lines, TopThreeLine{})
-			}
-		}
-
-		for key, rawLineData := range updatePayload.Lines {
-			// Convert map key ("0", "1", "2") to integer index
-			index, err := strconv.Atoi(key)
-			if err != nil {
-				fmt.Printf("Warning: Invalid non-integer key '%s' in TopThree Lines update map.\n", key)
-				continue
-			}
-
-			// We shouldn't need this but man I dont trust this api
-			if index < 0 || index >= len(gs.R.TopThree.Lines) {
-				fmt.Printf("Warning: Index %d out of bounds for TopThree Lines slice (size %d).\n", index, len(gs.R.TopThree.Lines))
-				continue
-			}
-
-			existingLine := &gs.R.TopThree.Lines[index]
-
-			if err := json.Unmarshal(rawLineData, existingLine); err != nil {
-				fmt.Printf("Warning: Failed to apply partial TopThree update for index %d: %v. Update data: %s\n", index, err, string(rawLineData))
-				continue
-			}
-			// No need to put it back in the slice, as we modified it via pointer.
-		}
-
+		return gs.updateTopThree(payloadBytes)
 	case "TimingStats":
-		type TimingStatsUpdatePayload struct {
-			Lines       map[string]json.RawMessage `json:"Lines"`
-			Withheld    *bool                      `json:"Withheld,omitempty"`
-			SessionType *string                    `json:"SessionType,omitempty"`
-		}
-
-		var updatePayload TimingStatsUpdatePayload
-		if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
-			fmt.Printf("Warning: Failed to unmarshal TimingStats payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
-			return nil
-		}
-
-		if gs.R.TimingStats == nil {
-			gs.R.TimingStats = &TimingStatsData{Lines: make(map[string]DriverTimingStats)}
-		}
-		if gs.R.TimingStats.Lines == nil {
-			gs.R.TimingStats.Lines = make(map[string]DriverTimingStats)
-		}
-
-		if updatePayload.Withheld != nil {
-			gs.R.TimingStats.Withheld = *updatePayload.Withheld
-		}
-		if updatePayload.SessionType != nil {
-			gs.R.TimingStats.SessionType = *updatePayload.SessionType
-		}
-
-		for driverNumber, rawDriverUpdateData := range updatePayload.Lines {
-			existingStats, found := gs.R.TimingStats.Lines[driverNumber]
-			if !found {
-				existingStats = DriverTimingStats{
-					BestSectors: make([]SectorOrSpeedInfo, 3),
-				}
-				fmt.Printf("Info: Creating new TimingStats entry for driver %s during update.\n", driverNumber)
-			}
-
-			// Check for "BestSectors" value, this value is sent not as an array but with the index as the key.
-			// Since this breaks auto marshall we will process it separate and remove after.
-			var dataMap map[string]interface{}
-			if err = json.Unmarshal(rawDriverUpdateData, &dataMap); err != nil {
-				err = fmt.Errorf("failed to unmarshal raw message: %w", err)
-				continue
-			}
-			bestSectorsData, exists := dataMap["BestSectors"]
-			if exists {
-				bestSectorsBytes, err := json.Marshal(bestSectorsData)
-				if err != nil {
-					fmt.Printf("Warning: Failed to marshal BestSectors data for driver %s: %v. Update data: %s\n", driverNumber, err, string(rawDriverUpdateData))
-					continue
-				}
-
-				var parsedBestSectors map[string]SectorOrSpeedInfo
-				err = json.Unmarshal(bestSectorsBytes, &parsedBestSectors)
-				if err != nil {
-					fmt.Printf("Warning: Failed to unmarshal BestSectors map for driver %s: %v. Update data: %s\n", driverNumber, err, string(rawDriverUpdateData))
-					continue
-				}
-
-				for sectorIndexStr, sectorData := range parsedBestSectors {
-					index, err := strconv.Atoi(sectorIndexStr)
-					if err != nil {
-						fmt.Printf("Warning: Invalid sector index '%s' for driver %s: %v. Update data: %s\n", sectorIndexStr, driverNumber, err, string(rawDriverUpdateData))
-						continue
-					}
-					target := &existingStats.BestSectors[index]
-					if sectorData.Value != "" {
-						target.Value = sectorData.Value
-					}
-					if sectorData.Position != 0 {
-						target.Position = sectorData.Position
-					}
-				}
-
-				delete(dataMap, "BestSectors")
-				// Re marshal datamap to remove the best sector
-				rawDriverUpdateData, err = json.Marshal(dataMap)
-				if err != nil {
-					fmt.Printf("ERROR: Failed to remarshall datamap post best sector process: %s\n", dataMap)
-				}
-			}
-
-			if err := json.Unmarshal(rawDriverUpdateData, &existingStats); err != nil {
-				fmt.Printf("Warning: Failed to apply partial TimingStats update for driver %s: %v. Update data: %s\n", driverNumber, err, string(rawDriverUpdateData))
-				continue
-			}
-
-			gs.R.TimingStats.Lines[driverNumber] = existingStats
-		}
-
+		return gs.updateTimingStats(payloadBytes)
 	case "TimingAppData":
-		type TimingAppDataUpdatePayload struct {
-			Lines map[string]json.RawMessage `json:"Lines"`
-		}
-
-		var updatePayload TimingAppDataUpdatePayload
-		if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
-			fmt.Printf("Warning: Failed to unmarshal TimingAppData payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
-			return nil
-		}
-
-		if gs.R.TimingAppData == nil {
-			gs.R.TimingAppData = &TimingAppData{Lines: make(map[string]DriverTimingAppData)}
-		}
-		if gs.R.TimingAppData.Lines == nil {
-			gs.R.TimingAppData.Lines = make(map[string]DriverTimingAppData)
-		}
-
-		for driverNumber, rawDriverUpdateData := range updatePayload.Lines {
-
-			existingAppData, found := gs.R.TimingAppData.Lines[driverNumber]
-			if !found {
-				existingAppData = DriverTimingAppData{
-					RacingNumber: driverNumber,
-					Stints:       make([]StintInfo, 0),
-				}
-				fmt.Printf("Info: Creating new TimingAppData entry for driver %s during update.\n", driverNumber)
-			}
-
-			lineResult := gjson.Get(string(rawDriverUpdateData), "Line")
-			if lineResult.Exists() && lineResult.Type == gjson.Number {
-				existingAppData.Line = int(lineResult.Int())
-			}
-
-			stintsResult := gjson.Get(string(rawDriverUpdateData), "Stints")
-
-			if stintsResult.Exists() {
-				if stintsResult.IsArray() {
-					// Case 1: Stints is an array (initial full update)
-					// Simple unmarshal and replace
-					var newStints []StintInfo
-					if err := json.Unmarshal([]byte(stintsResult.Raw), &newStints); err != nil {
-						fmt.Printf("Warning: Failed to unmarshal TimingAppData Stints as array for driver %s: %v. Stints data: %s\n", driverNumber, err, stintsResult.Raw)
-					} else {
-						existingAppData.Stints = newStints
-					}
-				} else if stintsResult.IsObject() {
-					// Case 2: Stints is an object (partial updates keyed by index)
-					var stintUpdates map[string]json.RawMessage
-					if err := json.Unmarshal([]byte(stintsResult.Raw), &stintUpdates); err != nil {
-						fmt.Printf("Warning: Failed to unmarshal TimingAppData Stints as map for driver %s: %v. Stints data: %s\n", driverNumber, err, stintsResult.Raw)
-					} else {
-						if existingAppData.Stints == nil {
-							existingAppData.Stints = make([]StintInfo, 0)
-						}
-
-						maxIndex := -1
-						for k := range stintUpdates {
-							idx, err := strconv.Atoi(k)
-							if err == nil && idx > maxIndex {
-								maxIndex = idx
-							}
-						}
-
-						requiredSize := maxIndex + 1
-						if requiredSize > 0 && len(existingAppData.Stints) < requiredSize {
-							// Append empty structs to reach the required size
-							for i := len(existingAppData.Stints); i < requiredSize; i++ {
-								existingAppData.Stints = append(existingAppData.Stints, StintInfo{})
-							}
-						}
-
-						for stintKey, rawStintData := range stintUpdates {
-							stintIndex, err := strconv.Atoi(stintKey)
-							if err != nil {
-								fmt.Printf("Warning: Invalid non-integer key '%s' in TimingAppData Stints update for driver %s.\n", stintKey, driverNumber)
-								continue
-							}
-
-							if stintIndex < 0 || stintIndex >= len(existingAppData.Stints) {
-								fmt.Printf("Warning: Stint index %d out of bounds (slice length %d) in TimingAppData update for driver %s.\n", stintIndex, len(existingAppData.Stints), driverNumber)
-								continue
-							}
-
-							existingStint := &existingAppData.Stints[stintIndex]
-							if err := json.Unmarshal(rawStintData, existingStint); err != nil {
-								fmt.Printf("Warning: Failed to merge TimingAppData stint update at index %d for driver %s: %v. Stint data: %s\n", stintIndex, driverNumber, err, string(rawStintData))
-							}
-						}
-					}
-				} else {
-					fmt.Printf("Warning: TimingAppData Stints field for driver %s is neither array nor object. Type: %s, Data: %s\n", driverNumber, stintsResult.Type.String(), stintsResult.Raw)
-				}
-			}
-
-			gs.R.TimingAppData.Lines[driverNumber] = existingAppData
-		}
+		return gs.updateTimingAppData(payloadBytes)
 	case "RaceControlMessages":
-		if gs.R.RaceControlMessages == nil {
-			gs.R.RaceControlMessages = &RaceControlData{Messages: make([]RaceControlMessage, 0)}
-		}
-		if gs.R.RaceControlMessages.Messages == nil {
-			gs.R.RaceControlMessages.Messages = make([]RaceControlMessage, 0)
-		}
-
-		type RaceControlUpdatePayload struct {
-			Messages map[string]json.RawMessage `json:"Messages"`
-		}
-
-		type RaceControlInitialPayload struct {
-			Messages []RaceControlMessage
-		}
-
-		// TODO: First message is not parsed correctly, it doesnt have map just array
-		var updatePayload RaceControlUpdatePayload
-		if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
-			fmt.Printf("Warning: Failed to unmarshal RaceControlMessages payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
-			var initialPayload RaceControlInitialPayload
-			if err := json.Unmarshal(payloadBytes, &initialPayload); err != nil {
-				fmt.Printf("Warning: Failed to unmarshal RaceControlMessages payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
-				return nil
-			}
-			// Fill initial
-			if len(gs.R.RaceControlMessages.Messages) == 0 {
-				gs.R.RaceControlMessages.Messages = initialPayload.Messages
-			} else {
-				gs.R.RaceControlMessages.Messages = append(gs.R.RaceControlMessages.Messages, initialPayload.Messages...)
-			}
-		}
-
-		// TODO: Enforce the order based on these keys (appears to be index), testing for now if its ok
-		for _, rawMessageValue := range updatePayload.Messages {
-			var msg RaceControlMessage
-			if err := json.Unmarshal(rawMessageValue, &msg); err == nil {
-				gs.R.RaceControlMessages.Messages = append(gs.R.RaceControlMessages.Messages, msg)
-			} else {
-				fmt.Printf("Warning: Failed to unmarshal individual RaceControlMessage object: %v. Raw object: %s\n", err, string(rawMessageValue))
-			}
-		}
-
+		return gs.updateRaceControlMessages(payloadBytes)
 	case "SessionInfo":
 		if gs.R.SessionInfo == nil {
 			gs.R.SessionInfo = &SessionInfoData{}
@@ -920,258 +604,391 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		if err := json.Unmarshal(payloadBytes, gs.R.SessionInfo); err != nil {
 			return fmt.Errorf("failed to unmarshal SessionInfo payload: %w", err)
 		}
-
 	case "SessionData":
-		type SessionDataUpdatePayload struct {
-			Series       map[string]json.RawMessage `json:"Series,omitempty"`
-			StatusSeries map[string]json.RawMessage `json:"StatusSeries,omitempty"`
-		}
-
-		var updatePayload SessionDataUpdatePayload
-		if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
-			fmt.Printf("Warning: Failed to unmarshal SessionData payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
-			return nil
-		}
-
-		// Ensure the main struct and slices exist in the global state
-		if gs.R.SessionData == nil {
-			gs.R.SessionData = &SessionData{
-				Series:       make([]QualifyingPartInfo, 0),
-				StatusSeries: make([]StatusChangeInfo, 0),
-			}
-		}
-		if gs.R.SessionData.Series == nil {
-			gs.R.SessionData.Series = make([]QualifyingPartInfo, 0)
-		}
-		if gs.R.SessionData.StatusSeries == nil {
-			gs.R.SessionData.StatusSeries = make([]StatusChangeInfo, 0)
-		}
-
-		if updatePayload.Series != nil {
-			// Find max index to determine required slice size
-			maxIndex := -1
-			keysToProcess := make([]string, 0, len(updatePayload.Series))
-			for k := range updatePayload.Series {
-				keysToProcess = append(keysToProcess, k)
-				idx, err := strconv.Atoi(k)
-				if err == nil && idx > maxIndex {
-					maxIndex = idx
-				}
-			}
-			// Ensure slice is large enough
-			requiredSize := maxIndex + 1
-			if requiredSize > 0 && len(gs.R.SessionData.Series) < requiredSize {
-				for i := len(gs.R.SessionData.Series); i < requiredSize; i++ {
-					gs.R.SessionData.Series = append(gs.R.SessionData.Series, QualifyingPartInfo{})
-				}
-			}
-
-			// Apply updates
-			for key, rawData := range updatePayload.Series {
-				index, err := strconv.Atoi(key)
-				if err != nil {
-					fmt.Printf("Warning: Invalid non-integer key '%s' in SessionData.Series update map.\n", key)
-					continue
-				}
-				if index < 0 || index >= len(gs.R.SessionData.Series) {
-					fmt.Printf("Warning: Index %d out of bounds for SessionData.Series slice (size %d).\n", index, len(gs.R.SessionData.Series))
-					continue
-				}
-
-				// Unmarshal update directly into the slice element at the index
-				if err := json.Unmarshal(rawData, &gs.R.SessionData.Series[index]); err != nil {
-					fmt.Printf("Warning: Failed to apply SessionData.Series update for index %d: %v. Update data: %s\n", index, err, string(rawData))
-				}
-			}
-		}
-
-		if updatePayload.StatusSeries != nil {
-			// Find max index to determine required slice size
-			maxIndex := -1
-			keysToProcess := make([]string, 0, len(updatePayload.StatusSeries))
-			for k := range updatePayload.StatusSeries {
-				keysToProcess = append(keysToProcess, k)
-				idx, err := strconv.Atoi(k)
-				if err == nil && idx > maxIndex {
-					maxIndex = idx
-				}
-			}
-			// Ensure slice is large enough
-			requiredSize := maxIndex + 1
-			if requiredSize > 0 && len(gs.R.SessionData.StatusSeries) < requiredSize {
-				for i := len(gs.R.SessionData.StatusSeries); i < requiredSize; i++ {
-					gs.R.SessionData.StatusSeries = append(gs.R.SessionData.StatusSeries, StatusChangeInfo{})
-				}
-			}
-
-			// Apply updates
-			for key, rawData := range updatePayload.StatusSeries {
-				index, err := strconv.Atoi(key)
-				if err != nil {
-					fmt.Printf("Warning: Invalid non-integer key '%s' in SessionData.StatusSeries update map.\n", key)
-					continue
-				}
-				if index < 0 || index >= len(gs.R.SessionData.StatusSeries) {
-					fmt.Printf("Warning: Index %d out of bounds for SessionData.StatusSeries slice (size %d).\n", index, len(gs.R.SessionData.StatusSeries))
-					continue
-				}
-
-				// Unmarshal update directly into the slice element at the index
-				if err := json.Unmarshal(rawData, &gs.R.SessionData.StatusSeries[index]); err != nil {
-					fmt.Printf("Warning: Failed to apply SessionData.StatusSeries update for index %d: %v. Update data: %s\n", index, err, string(rawData))
-				}
-			}
-		}
-
+		return gs.updateSessionData(payloadBytes)
 	case "TimingData":
-		type TimingDataUpdatePayload struct {
-			NoEntries   []int                      `json:"NoEntries,omitempty"`
-			SessionPart *int                       `json:"SessionPart,omitempty"`
-			Lines       map[string]json.RawMessage `json:"Lines"` // Keep Lines as raw for later processing
-		}
-
-		var updatePayload TimingDataUpdatePayload
-		if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
-			fmt.Printf("Warning: Failed to unmarshal TimingData payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
-			return nil
-		}
-
-		if gs.R.TimingData == nil {
-			gs.R.TimingData = &TimingData{
-				Lines:     make(map[string]DriverTimingData),
-				NoEntries: make([]int, 0),
-			}
-		}
-		if gs.R.TimingData.Lines == nil {
-			gs.R.TimingData.Lines = make(map[string]DriverTimingData)
-		}
-
-		if updatePayload.SessionPart != nil {
-			gs.R.TimingData.SessionPart = *updatePayload.SessionPart
-		}
-		if updatePayload.NoEntries != nil {
-			gs.R.TimingData.NoEntries = updatePayload.NoEntries
-		}
-
-		for driverNumber, rawDriverUpdateData := range updatePayload.Lines {
-			existingDriverData, found := gs.R.TimingData.Lines[driverNumber]
-			if !found {
-				existingDriverData = DriverTimingData{
-					RacingNumber: driverNumber,
-				}
-				fmt.Printf("Info: Creating new TimingData entry for driver %s during update.\n", driverNumber)
-			}
-
-			// TODO: Lets do this after removing the slice updates to lower log crap
-			// Unmarshal directly into the existing struct pointer. This merges simple fields
-			// and fields that are structs (like BestLapTime, LastLapTime, Speeds) automatically.
-			// It will *not* correctly handle map-to-slice updates (Stats, Sectors).
-			if err := json.Unmarshal(rawDriverUpdateData, &existingDriverData); err != nil {
-				// Log error but continue to try and process slice updates if possible
-				// fmt.Printf("Warning: Initial unmarshal/merge for TimingData driver %s failed: %v. Partial merge might occur. Data: %s\n", driverNumber, err, string(rawDriverUpdateData))
-			}
-
-			// Pass 2: Handle map-to-slice conversions explicitly ==
-			// Define a temporary struct to extract only the fields that use map-based slice updates
-			type SliceUpdateFields struct {
-				BestLapTimes map[string]json.RawMessage `json:"BestLapTimes,omitempty"`
-				Stats        map[string]json.RawMessage `json:"Stats,omitempty"`
-				Sectors      map[string]json.RawMessage `json:"Sectors,omitempty"`
-			}
-			var sliceUpdates SliceUpdateFields
-			_ = json.Unmarshal(rawDriverUpdateData, &sliceUpdates)
-
-			// Apply updates for each map-to-slice field if updates exist
-			if len(sliceUpdates.BestLapTimes) > 0 {
-				if err := applyMapUpdatesToSlice(&existingDriverData.BestLapTimes, sliceUpdates.BestLapTimes); err != nil {
-					fmt.Printf("Warning: Error applying BestLapTimes updates for driver %s: %v\n", driverNumber, err)
-				}
-			}
-			if len(sliceUpdates.Stats) > 0 {
-				if err := applyMapUpdatesToSlice(&existingDriverData.Stats, sliceUpdates.Stats); err != nil {
-					fmt.Printf("Warning: Error applying Stats updates for driver %s: %v\n", driverNumber, err)
-				}
-			}
-			if len(sliceUpdates.Sectors) > 0 {
-				// Special handling for Sectors due to nested Segments
-				if err := applyMapUpdatesToSlice(&existingDriverData.Sectors, sliceUpdates.Sectors); err != nil {
-					fmt.Printf("Warning: Error applying Sectors/Segments updates for driver %s: %v\n", driverNumber, err)
-				}
-
-				// If its the last sector finishing then we will add the current timing details as a new
-				// lap to the history
-				sector, exists := sliceUpdates.Sectors["2"]
-				if exists {
-					sector2ValueResult := gjson.Get(string(sector), "Value")
-					if sector2ValueResult.Exists() && sector2ValueResult.Str != "" {
-						gs.saveLapToHistory(driverNumber)
-					}
-				}
-
-			}
-
-			type DeletionHint struct {
-				Deleted []string `json:"_deleted"`
-			}
-			var deletionHint DeletionHint
-			// Unmarshal again :/ just to check for _deleted hint
-			_ = json.Unmarshal(rawDriverUpdateData, &deletionHint)
-
-			if len(deletionHint.Deleted) > 0 {
-				// Use reflection on existingDriverData to zero out fields listed in deletionHint.Deleted
-				driverDataVal := reflect.ValueOf(&existingDriverData).Elem()
-				for _, fieldToZero := range deletionHint.Deleted {
-					fieldVal := driverDataVal.FieldByName(fieldToZero)
-					if fieldVal.IsValid() && fieldVal.CanSet() {
-						fieldVal.Set(reflect.Zero(fieldVal.Type())) // Set to zero value
-						fmt.Printf("Info: Zeroed out field '%s' for driver %s based on _deleted hint.\n", fieldToZero, driverNumber)
-					} else {
-						fmt.Printf("Warning: Could not find or set field '%s' for deletion hint on driver %s.\n", fieldToZero, driverNumber)
-					}
-				}
-			}
-
-			// Put the fully merged struct back into the map
-			gs.R.TimingData.Lines[driverNumber] = existingDriverData
-		}
-		// fmt.Printf("Processed TimingData update.\n")
+		return gs.updateTimingData(payloadBytes)
 	case "TyreStintSeries":
-		type TyreStintSeriesUpdatePayload struct {
-			Stints map[string]map[string]json.RawMessage `json:"Stints"`
-		}
-
-		var updatePayload TyreStintSeriesUpdatePayload
-		if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
-			fmt.Printf("Warning: Failed to unmarshal TyreStintSeries payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
-			return nil
-		}
-
-		if gs.R.TyreStintSeries == nil {
-			gs.R.TyreStintSeries = &TyreStintSeries{Stints: make(map[string][]TyreStint)}
-		}
-		if gs.R.TyreStintSeries.Stints == nil {
-			gs.R.TyreStintSeries.Stints = make(map[string][]TyreStint)
-		}
-
-		for driverNumber, stintUpdates := range updatePayload.Stints {
-			existingStints, found := gs.R.TyreStintSeries.Stints[driverNumber]
-			if !found {
-				existingStints = make([]TyreStint, 0)
-				fmt.Printf("Info: Creating new TyreStintSeries entry for driver %s during update.\n", driverNumber)
-			}
-
-			if err := applyMapUpdatesToSlice(&existingStints, stintUpdates); err != nil {
-				fmt.Printf("Warning: Error applying TyreStint updates for driver %s: %v\n", driverNumber, err)
-			}
-
-			gs.R.TyreStintSeries.Stints[driverNumber] = existingStints
-		}
-		return nil
-
+		return gs.updateTyreStintSeries(payloadBytes)
 	default:
 		fmt.Printf("Warning: Unhandled feed update for field: %s\n", fieldName)
 	}
 
+	return nil
+}
+
+func (gs *GlobalState) updateDriverList(payloadBytes []byte) error {
+	var driverUpdates map[string]json.RawMessage
+	if err := json.Unmarshal(payloadBytes, &driverUpdates); err != nil {
+		return fmt.Errorf("failed to unmarshal DriverList update payload into map: %w", err)
+	}
+
+	// Annoying, so annoying
+	// They send 1 extra field thats not a drive but will still unmarshal to one
+	delete(driverUpdates, "_kf")
+
+	if gs.R.DriverList == nil {
+		gs.R.DriverList = make(map[string]DriverInfo)
+		fmt.Println("Warning: DriverList was nil during update. Initialized empty map.")
+	}
+
+	for driverNumber, rawUpdateData := range driverUpdates {
+		existingInfo, found := gs.R.DriverList[driverNumber]
+		if found {
+			if err := json.Unmarshal(rawUpdateData, &existingInfo); err != nil {
+				// Log error for this specific driver update but continue with others
+				fmt.Printf("Warning: Failed to apply partial DriverList update for driver %s: %v. Update data: %s\n", driverNumber, err, string(rawUpdateData))
+				continue
+			}
+			// We have to restore this in the map, we edited a copy technically
+			gs.R.DriverList[driverNumber] = existingInfo
+			// fmt.Printf("Updated DriverList for driver %s: Line=%d\n", driverNumber, existingInfo.Line)
+		} else {
+			fmt.Printf("Warning: Received DriverList update for driver %s who is not in the current state. Update data: %s\n", driverNumber, string(rawUpdateData))
+		}
+	}
+	return nil
+}
+
+func (gs *GlobalState) updateTopThree(payloadBytes []byte) error {
+	type TopThreeUpdatePayload struct {
+		Lines       map[string]json.RawMessage `json:"Lines"`
+		SessionPart *int                       `json:"SessionPart,omitempty"`
+		Withheld    *bool                      `json:"Withheld,omitempty"`
+	}
+
+	var updatePayload TopThreeUpdatePayload
+	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
+		fmt.Printf("Warning: Failed to unmarshal TopThree payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
+		return nil
+	}
+
+	if gs.R.TopThree == nil {
+		gs.R.TopThree = &TopThreeData{Lines: make([]TopThreeLine, 0)}
+	}
+
+	if updatePayload.SessionPart != nil {
+		gs.R.TopThree.SessionPart = *updatePayload.SessionPart
+	}
+	if updatePayload.Withheld != nil {
+		gs.R.TopThree.Withheld = *updatePayload.Withheld
+	}
+
+	if err := applyMapUpdatesToSlice(&gs.R.TopThree.Lines, updatePayload.Lines); err != nil {
+		fmt.Printf("Warning: Error applying TopThree updates: %v\n", err)
+	}
+	return nil
+}
+
+func (gs *GlobalState) updateTimingStats(payloadBytes []byte) error {
+	type TimingStatsUpdatePayload struct {
+		Lines       map[string]json.RawMessage `json:"Lines"`
+		Withheld    *bool                      `json:"Withheld,omitempty"`
+		SessionType *string                    `json:"SessionType,omitempty"`
+	}
+
+	var updatePayload TimingStatsUpdatePayload
+	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
+		fmt.Printf("Warning: Failed to unmarshal TimingStats payload: %v. Payload: %s\n", err, string(payloadBytes))
+		return nil
+	}
+
+	if gs.R.TimingStats == nil {
+		gs.R.TimingStats = &TimingStatsData{Lines: make(map[string]DriverTimingStats)}
+	}
+	if gs.R.TimingStats.Lines == nil {
+		gs.R.TimingStats.Lines = make(map[string]DriverTimingStats)
+	}
+
+	if updatePayload.Withheld != nil {
+		gs.R.TimingStats.Withheld = *updatePayload.Withheld
+	}
+	if updatePayload.SessionType != nil {
+		gs.R.TimingStats.SessionType = *updatePayload.SessionType
+	}
+
+	for driverNumber, rawDriverUpdateData := range updatePayload.Lines {
+		existingStats, found := gs.R.TimingStats.Lines[driverNumber]
+		if !found {
+			existingStats = DriverTimingStats{
+				BestSectors: make([]SectorOrSpeedInfo, 3),
+			}
+		}
+
+		// Check for "BestSectors" value, this value is sent not as an array but with the index as the key.
+		// Since this breaks auto marshall we will process it separate and remove after.
+		var dataMap map[string]interface{}
+		if err := json.Unmarshal(rawDriverUpdateData, &dataMap); err != nil {
+			fmt.Printf("Warning: failed to unmarshal raw message for TimingStats driver %s: %v\n", driverNumber, err)
+			continue
+		}
+
+		if bestSectorsData, exists := dataMap["BestSectors"]; exists {
+			bestSectorsBytes, err := json.Marshal(bestSectorsData)
+			if err != nil {
+				fmt.Printf("Warning: Failed to marshal BestSectors for driver %s: %v\n", driverNumber, err)
+			} else {
+				var bestSectorsMap map[string]json.RawMessage
+				if err := json.Unmarshal(bestSectorsBytes, &bestSectorsMap); err != nil {
+					fmt.Printf("Warning: Failed to unmarshal BestSectors map for driver %s: %v\n", driverNumber, err)
+				} else {
+					if err := applyMapUpdatesToSlice(&existingStats.BestSectors, bestSectorsMap); err != nil {
+						fmt.Printf("Warning: Error applying BestSectors updates for driver %s: %v\n", driverNumber, err)
+					}
+				}
+			}
+			delete(dataMap, "BestSectors")
+			// Re marshal datamap to remove the best sector
+			rawDriverUpdateData, err = json.Marshal(dataMap)
+			if err != nil {
+				fmt.Printf("ERROR: Failed to remarshal datamap for driver %s: %v\n", driverNumber, err)
+			}
+		}
+
+		if err := json.Unmarshal(rawDriverUpdateData, &existingStats); err != nil {
+			fmt.Printf("Warning: Failed to apply partial TimingStats update for driver %s: %v. Data: %s\n", driverNumber, err, string(rawDriverUpdateData))
+			continue
+		}
+		gs.R.TimingStats.Lines[driverNumber] = existingStats
+	}
+	return nil
+}
+
+func (gs *GlobalState) updateTimingAppData(payloadBytes []byte) error {
+	var updatePayload struct {
+		Lines map[string]json.RawMessage `json:"Lines"`
+	}
+	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
+		fmt.Printf("Warning: Failed to unmarshal TimingAppData payload: %v. Payload: %s\n", err, string(payloadBytes))
+		return nil
+	}
+
+	if gs.R.TimingAppData == nil {
+		gs.R.TimingAppData = &TimingAppData{Lines: make(map[string]DriverTimingAppData)}
+	}
+	if gs.R.TimingAppData.Lines == nil {
+		gs.R.TimingAppData.Lines = make(map[string]DriverTimingAppData)
+	}
+
+	for driverNumber, rawDriverUpdateData := range updatePayload.Lines {
+		existingAppData, found := gs.R.TimingAppData.Lines[driverNumber]
+		if !found {
+			existingAppData = DriverTimingAppData{
+				RacingNumber: driverNumber,
+				Stints:       make([]StintInfo, 0),
+			}
+		}
+
+		lineResult := gjson.Get(string(rawDriverUpdateData), "Line")
+		if lineResult.Exists() && lineResult.Type == gjson.Number {
+			existingAppData.Line = int(lineResult.Int())
+		}
+
+		stintsResult := gjson.Get(string(rawDriverUpdateData), "Stints")
+		if stintsResult.Exists() {
+			if stintsResult.IsArray() {
+				var newStints []StintInfo
+				if err := json.Unmarshal([]byte(stintsResult.Raw), &newStints); err != nil {
+					fmt.Printf("Warning: Failed to unmarshal Stints array for driver %s: %v\n", driverNumber, err)
+				} else {
+					existingAppData.Stints = newStints
+				}
+			} else if stintsResult.IsObject() {
+				var stintUpdates map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(stintsResult.Raw), &stintUpdates); err != nil {
+					fmt.Printf("Warning: Failed to unmarshal Stints map for driver %s: %v\n", driverNumber, err)
+				} else {
+					if err := applyMapUpdatesToSlice(&existingAppData.Stints, stintUpdates); err != nil {
+						fmt.Printf("Warning: Error applying Stints updates for driver %s: %v\n", driverNumber, err)
+					}
+				}
+			}
+		}
+		gs.R.TimingAppData.Lines[driverNumber] = existingAppData
+	}
+	return nil
+}
+
+func (gs *GlobalState) updateRaceControlMessages(payloadBytes []byte) error {
+	if gs.R.RaceControlMessages == nil {
+		gs.R.RaceControlMessages = &RaceControlData{Messages: make([]RaceControlMessage, 0)}
+	}
+
+	var updatePayload struct {
+		Messages map[string]json.RawMessage `json:"Messages"`
+	}
+	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
+		var initialPayload struct {
+			Messages []RaceControlMessage `json:"Messages"`
+		}
+		if err2 := json.Unmarshal(payloadBytes, &initialPayload); err2 != nil {
+			fmt.Printf("Warning: Failed to unmarshal RaceControlMessages as map or array: %v. Payload: %s\n", err, string(payloadBytes))
+			return nil
+		}
+		gs.R.RaceControlMessages.Messages = append(gs.R.RaceControlMessages.Messages, initialPayload.Messages...)
+		return nil
+	}
+
+	for _, rawMessageValue := range updatePayload.Messages {
+		var msg RaceControlMessage
+		if err := json.Unmarshal(rawMessageValue, &msg); err == nil {
+			gs.R.RaceControlMessages.Messages = append(gs.R.RaceControlMessages.Messages, msg)
+		} else {
+			fmt.Printf("Warning: Failed to unmarshal individual RaceControlMessage: %v. Raw: %s\n", err, string(rawMessageValue))
+		}
+	}
+	return nil
+}
+
+func (gs *GlobalState) updateSessionData(payloadBytes []byte) error {
+	var updatePayload struct {
+		Series       map[string]json.RawMessage `json:"Series,omitempty"`
+		StatusSeries map[string]json.RawMessage `json:"StatusSeries,omitempty"`
+	}
+	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
+		fmt.Printf("Warning: Failed to unmarshal SessionData payload: %v. Payload: %s\n", err, string(payloadBytes))
+		return nil
+	}
+
+	if gs.R.SessionData == nil {
+		gs.R.SessionData = &SessionData{}
+	}
+	if updatePayload.Series != nil {
+		if err := applyMapUpdatesToSlice(&gs.R.SessionData.Series, updatePayload.Series); err != nil {
+			fmt.Printf("Warning: Error applying SessionData.Series updates: %v\n", err)
+		}
+	}
+	if updatePayload.StatusSeries != nil {
+		if err := applyMapUpdatesToSlice(&gs.R.SessionData.StatusSeries, updatePayload.StatusSeries); err != nil {
+			fmt.Printf("Warning: Error applying SessionData.StatusSeries updates: %v\n", err)
+		}
+	}
+	return nil
+}
+
+func (gs *GlobalState) updateTimingData(payloadBytes []byte) error {
+	type TimingDataUpdatePayload struct {
+		NoEntries   []int                      `json:"NoEntries,omitempty"`
+		SessionPart *int                       `json:"SessionPart,omitempty"`
+		Lines       map[string]json.RawMessage `json:"Lines"`
+	}
+
+	var updatePayload TimingDataUpdatePayload
+	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
+		fmt.Printf("Warning: Failed to unmarshal TimingData payload: %v. Payload: %s\n", err, string(payloadBytes))
+		return nil
+	}
+
+	if gs.R.TimingData == nil {
+		gs.R.TimingData = &TimingData{Lines: make(map[string]DriverTimingData)}
+	}
+	if gs.R.TimingData.Lines == nil {
+		gs.R.TimingData.Lines = make(map[string]DriverTimingData)
+	}
+
+	if updatePayload.SessionPart != nil {
+		gs.R.TimingData.SessionPart = *updatePayload.SessionPart
+	}
+	if updatePayload.NoEntries != nil {
+		gs.R.TimingData.NoEntries = updatePayload.NoEntries
+	}
+
+	for driverNumber, rawDriverUpdateData := range updatePayload.Lines {
+		existingDriverData, found := gs.R.TimingData.Lines[driverNumber]
+		if !found {
+			existingDriverData = DriverTimingData{RacingNumber: driverNumber}
+		}
+
+		// TODO: Lets do this after removing the slice updates to lower log crap
+		// Unmarshal directly into the existing struct pointer. This merges simple fields
+		// and fields that are structs (like BestLapTime, LastLapTime, Speeds) automatically.
+		// It will *not* correctly handle map-to-slice updates (Stats, Sectors).
+		if err := json.Unmarshal(rawDriverUpdateData, &existingDriverData); err != nil {
+			// This initial unmarshal will fail on map-to-slice fields, which is expected.
+		}
+
+		// Pass 2: Handle map-to-slice conversions explicitly ==
+		// Define a temporary struct to extract only the fields that use map-based slice updates
+		type SliceUpdateFields struct {
+			BestLapTimes map[string]json.RawMessage `json:"BestLapTimes,omitempty"`
+			Stats        map[string]json.RawMessage `json:"Stats,omitempty"`
+			Sectors      map[string]json.RawMessage `json:"Sectors,omitempty"`
+		}
+		var sliceUpdates SliceUpdateFields
+		_ = json.Unmarshal(rawDriverUpdateData, &sliceUpdates)
+
+		// Apply updates for each map-to-slice field if updates exist
+		if len(sliceUpdates.BestLapTimes) > 0 {
+			if err := applyMapUpdatesToSlice(&existingDriverData.BestLapTimes, sliceUpdates.BestLapTimes); err != nil {
+				fmt.Printf("Warning: Error applying BestLapTimes updates for driver %s: %v\n", driverNumber, err)
+			}
+		}
+		if len(sliceUpdates.Stats) > 0 {
+			if err := applyMapUpdatesToSlice(&existingDriverData.Stats, sliceUpdates.Stats); err != nil {
+				fmt.Printf("Warning: Error applying Stats updates for driver %s: %v\n", driverNumber, err)
+			}
+		}
+		if len(sliceUpdates.Sectors) > 0 {
+			// Special handling for Sectors due to nested Segments
+			if err := applyMapUpdatesToSlice(&existingDriverData.Sectors, sliceUpdates.Sectors); err != nil {
+				fmt.Printf("Warning: Error applying Sectors updates for driver %s: %v\n", driverNumber, err)
+			}
+
+			// If its the last sector finishing then we will add the current timing details as a new
+			// lap to the history
+			if sector, exists := sliceUpdates.Sectors["2"]; exists {
+				if gjson.Get(string(sector), "Value").Exists() && gjson.Get(string(sector), "Value").Str != "" {
+					fmt.Printf("Update: %s", sliceUpdates.Sectors)
+					gs.saveLapToHistory(driverNumber)
+				}
+			}
+		}
+
+		var deletionHint struct {
+			Deleted []string `json:"_deleted"`
+		}
+		_ = json.Unmarshal(rawDriverUpdateData, &deletionHint)
+		if len(deletionHint.Deleted) > 0 {
+			driverDataVal := reflect.ValueOf(&existingDriverData).Elem()
+			for _, fieldToZero := range deletionHint.Deleted {
+				fieldVal := driverDataVal.FieldByName(fieldToZero)
+				if fieldVal.IsValid() && fieldVal.CanSet() {
+					fieldVal.Set(reflect.Zero(fieldVal.Type()))
+				}
+			}
+		}
+
+		gs.R.TimingData.Lines[driverNumber] = existingDriverData
+	}
+	return nil
+}
+
+func (gs *GlobalState) updateTyreStintSeries(payloadBytes []byte) error {
+	var updatePayload struct {
+		Stints map[string]map[string]json.RawMessage `json:"Stints"`
+	}
+	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
+		fmt.Printf("Warning: Failed to unmarshal TyreStintSeries payload: %v. Payload: %s\n", err, string(payloadBytes))
+		return nil
+	}
+
+	if gs.R.TyreStintSeries == nil {
+		gs.R.TyreStintSeries = &TyreStintSeries{Stints: make(map[string][]TyreStint)}
+	}
+	if gs.R.TyreStintSeries.Stints == nil {
+		gs.R.TyreStintSeries.Stints = make(map[string][]TyreStint)
+	}
+
+	for driverNumber, stintUpdates := range updatePayload.Stints {
+		existingStints, found := gs.R.TyreStintSeries.Stints[driverNumber]
+		if !found {
+			existingStints = make([]TyreStint, 0)
+		}
+		if err := applyMapUpdatesToSlice(&existingStints, stintUpdates); err != nil {
+			fmt.Printf("Warning: Error applying TyreStint updates for driver %s: %v\n", driverNumber, err)
+		}
+		gs.R.TyreStintSeries.Stints[driverNumber] = existingStints
+	}
 	return nil
 }
 
@@ -1313,17 +1130,22 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 		}
 	}
 
+	// The numberOfLaps from the datastream can sometimes be off :/ So we can just calc by what we have
+	lapNum := len(lapHistory.CompletedLaps) + 1
+	if lapNum == 0 {
+		return
+	}
+
 	hasPitted := driverTiming.InPit || driverTiming.PitOut
 
 	currentSectors := make([]SectorTiming, len(driverTiming.Sectors))
 	if len(driverTiming.Sectors) > 0 {
 		for i, s := range driverTiming.Sectors {
 			copiedSector := s
-
 			if len(s.Segments) > 0 {
 				copiedSector.Segments = make([]SegmentStatus, len(s.Segments))
 				for _, seg := range s.Segments {
-					if seg.Status == 2064 {
+					if seg.Status == SegmentStatusPit {
 						hasPitted = true
 					}
 				}
@@ -1335,26 +1157,28 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 		}
 	}
 
-	lapNum := len(lapHistory.CompletedLaps) + 1
-
 	lapTime, err := sumOfSectors(currentSectors)
 	if err != nil {
-		// fmt.Printf("Info (saveLapToHistory): failed to extrapolate laptime %s (Lap: %d, err: '%s'). Saving as N/A and Pitted.\n",
-		// 	driverNum, lapNum, err)
+		fmt.Printf("Info (saveLapToHistory): failed to extrapolate laptime %s (Lap: %d, err: '%s'). Saving as N/A and Pitted.\n",
+			driverNum, lapNum, err)
 		lapTime = "N/A"
-		hasPitted = true // Mark as pitted if laptime extrapolation fails
+		hasPitted = true
 	} else {
-		// fmt.Printf("Calculated laptime for %s: %s\n", driverNum, lapTime)
+		fmt.Printf("Calculated laptime for %s: %s\n", driverNum, lapTime)
 	}
 
 	driverStints := gs.R.TimingAppData.Lines[driverNum].Stints
+	var compound string
+	if len(driverStints) > 0 {
+		compound = driverStints[len(driverStints)-1].Compound
+	}
 
 	newCompletedLap := CompletedLap{
 		Lap:          lapNum,
 		LapTime:      lapTime,
 		Sectors:      currentSectors,
 		Pitted:       hasPitted,
-		TyreCompound: driverStints[len(driverStints)-1].Compound,
+		TyreCompound: compound,
 	}
 
 	foundIndex := -1
@@ -1366,11 +1190,10 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 	}
 
 	if foundIndex != -1 {
-		// Lap already exists, update it with the new data
 		lapHistory.CompletedLaps[foundIndex] = newCompletedLap
 	} else {
 		lapHistory.CompletedLaps = append(lapHistory.CompletedLaps, newCompletedLap)
-		// fmt.Printf("Info (applyCurrentLapToHistory): Added lap %d for driver %s.\n", newCompletedLap.Lap, driverNum)
+		fmt.Printf("Info (applyCurrentLapToHistory): Added lap %d for driver %s.\n", newCompletedLap.Lap, driverNum)
 	}
 
 	gs.R.LapHistoryMap[driverNum] = lapHistory
