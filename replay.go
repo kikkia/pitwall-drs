@@ -17,7 +17,7 @@ import (
 
 const (
 	replayListenAddr  = "localhost:8080"
-	recordingFilePath = "recordings/f1tv_events_spain_race.txt"
+	recordingFilePath = "recordings/Austrian_Grand_Prix_recordings/Austrian_Grand_Prix/Qualifying.txt"
 	startDelay        = 5 * time.Second
 
 	timestampLayout            = time.RFC3339
@@ -25,7 +25,7 @@ const (
 )
 
 var (
-	timeFactor int64 = 5
+	timeFactor int64 = 1
 
 	globalState           *model.GlobalState
 	browserBroadcaster    *broadcaster.Broadcaster
@@ -34,9 +34,8 @@ var (
 	firstClientConnected = make(chan struct{})
 	once                 sync.Once
 
-	PROFILE_MESSAGE_HANDLER = true // Set to true to enable profiling
+	PROFILE_MESSAGE_HANDLER = false
 
-	// Variables for message handler profiling
 	messageHandlerTotalDuration time.Duration
 	messageHandlerMessageCount  int
 	messageHandlerMutex         sync.Mutex
@@ -59,6 +58,7 @@ func main() {
 	go runReplayLogic()
 
 	http.HandleFunc("/ws", handleReplayConnections)
+	http.HandleFunc("/state", handleState)
 
 	err := http.ListenAndServe(replayListenAddr, nil)
 	if err != nil {
@@ -72,17 +72,40 @@ func handleReplayConnections(w http.ResponseWriter, r *http.Request) {
 	initialState, err := globalState.GetStateAsJSON()
 	if err != nil {
 		fmt.Printf("Error retrieving global state json for initial message: %v\n", err)
-		initialState = nil // Proceed without initial state if there's an error
+		initialState = nil
 	}
 
-	// Signal that the first client has connected
 	once.Do(func() {
 		log.Println("First client connected, signaling replay start...")
-		close(firstClientConnected) // Close the channel to signal
+		close(firstClientConnected)
 	})
 
-	// Use the shared broadcaster to handle the new connection
 	browserBroadcaster.HandleConnections(w, r, initialState)
+}
+
+func handleState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	state := globalState
+
+	w.Header().Set("Content-Type", "application/json")
+	// Ehh for local dev rn
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if state == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Driver data not yet available"})
+		return
+	}
+
+	err := json.NewEncoder(w).Encode(state)
+	if err != nil {
+		fmt.Printf("Error encoding driver list JSON: %v\n", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 // Parses a line from the recording file
@@ -201,7 +224,7 @@ func runReplayLogic() {
 func processAndBroadcastMessage(payload []byte) {
 	var start time.Time
 	if PROFILE_MESSAGE_HANDLER {
-		start = time.Now() // Start timing
+		start = time.Now()
 	}
 
 	var signalRMessage map[string]interface{}
@@ -223,10 +246,21 @@ func processAndBroadcastMessage(payload []byte) {
 					if hub, hubOk := msgMap["H"].(string); hubOk && hub == "Streaming" {
 						if method, methodOk := msgMap["M"].(string); methodOk && method == "feed" {
 							if args, argsOk := msgMap["A"].([]interface{}); argsOk {
+								// Check if the event is "ExtrapolatedClock" and replace its timestamp
+								if len(args) > 0 {
+									if eventName, isString := args[0].(string); isString && eventName == "ExtrapolatedClock" {
+										if len(args) > 2 {
+											// Replace the timestamp with the current UTC timestamp
+											args[2] = time.Now().UTC().Format(time.RFC3339Nano)
+											log.Printf("Replaced ExtrapolatedClock timestamp with current time: %s", args[2])
+										}
+									}
+								}
+
 								if globalState != nil {
 									err := globalState.ApplyFeedUpdate(args)
 									if err != nil {
-										fmt.Printf("Failed to apply feed update during replay: %v\n Update Args: %v\n", err, args)
+										fmt.Printf("Failed to apply feed update during replay: %v\n Update Args: %v: %v\n", err, args[0], args)
 									}
 								} else {
 									fmt.Println("Skipping feed update as global state is not yet initialized in replay.")
@@ -237,6 +271,14 @@ func processAndBroadcastMessage(payload []byte) {
 				}
 			}
 		}
+		// Re-marshal the modified signalRMessage back to payload
+		modifiedPayload, err := json.Marshal(signalRMessage)
+		if err != nil {
+			fmt.Printf("Failed to re-marshal message after timestamp modification: %v\n", err)
+			// If re-marshalling fails, use the original payload for broadcasting
+			modifiedPayload = payload
+		}
+		payload = modifiedPayload
 	} else {
 		fmt.Printf("Failed to parse received message as JSON during replay: %v\n", err)
 	}
@@ -245,7 +287,7 @@ func processAndBroadcastMessage(payload []byte) {
 	browserBroadcaster.Broadcast(payload)
 
 	if PROFILE_MESSAGE_HANDLER {
-		duration := time.Since(start) // Stop timing
+		duration := time.Since(start)
 
 		messageHandlerMutex.Lock()
 		messageHandlerTotalDuration += duration
