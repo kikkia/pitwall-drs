@@ -186,6 +186,35 @@ func runReplayLogic() {
 	var previousTimestamp time.Time
 	firstMsg := messages[0]
 	log.Printf("Sending first message (Timestamp: %s)", firstMsg.Timestamp.Format(time.RFC3339))
+
+	var signalRMessage map[string]interface{}
+	if err := json.Unmarshal(firstMsg.Payload, &signalRMessage); err == nil {
+		if rData, ok := signalRMessage["R"].(map[string]interface{}); ok {
+			if ecData, ok := rData["ExtrapolatedClock"].(map[string]interface{}); ok {
+				if utc, ok := ecData["Utc"].(string); ok {
+					extrapolatedClockTime, err := time.Parse(time.RFC3339Nano, utc)
+					if err != nil {
+						extrapolatedClockTime, err = time.Parse(time.RFC3339, utc)
+					}
+
+					if err == nil {
+						diff := extrapolatedClockTime.Sub(firstMsg.Timestamp)
+						newUtc := time.Now().Add(diff).UTC().Format(time.RFC3339Nano)
+						log.Printf("Replacing R ExtrapolatedClock 'Utc' property with current time adjusted by diff: %s", newUtc)
+						ecData["Utc"] = newUtc
+
+						modifiedPayload, err := json.Marshal(signalRMessage)
+						if err == nil {
+							firstMsg.Payload = modifiedPayload
+						}
+					} else {
+						log.Printf("Could not parse R ExtrapolatedClock time '%s': %v", utc, err)
+					}
+				}
+			}
+		}
+	}
+
 	processAndBroadcastMessage(firstMsg.Payload)
 	previousTimestamp = firstMsg.Timestamp
 
