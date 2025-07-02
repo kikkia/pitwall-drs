@@ -1335,18 +1335,22 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 		}
 	}
 
+	lapNum := len(lapHistory.CompletedLaps) + 1
+
 	lapTime, err := sumOfSectors(currentSectors)
 	if err != nil {
-		fmt.Printf("Info (saveLapToHistory): failed to extrapolate laptime %s (Lap: %d, err: '%s').\n",
-			driverNum, driverTiming.NumberOfLaps, err)
-		return
+		// fmt.Printf("Info (saveLapToHistory): failed to extrapolate laptime %s (Lap: %d, err: '%s'). Saving as N/A and Pitted.\n",
+		// 	driverNum, lapNum, err)
+		lapTime = "N/A"
+		hasPitted = true // Mark as pitted if laptime extrapolation fails
+	} else {
+		// fmt.Printf("Calculated laptime for %s: %s\n", driverNum, lapTime)
 	}
-	fmt.Printf("Calculated laptime for %s: %s\n", driverNum, lapTime)
 
 	driverStints := gs.R.TimingAppData.Lines[driverNum].Stints
 
 	newCompletedLap := CompletedLap{
-		Lap:          driverTiming.NumberOfLaps + 1,
+		Lap:          lapNum,
 		LapTime:      lapTime,
 		Sectors:      currentSectors,
 		Pitted:       hasPitted,
@@ -1366,7 +1370,7 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 		lapHistory.CompletedLaps[foundIndex] = newCompletedLap
 	} else {
 		lapHistory.CompletedLaps = append(lapHistory.CompletedLaps, newCompletedLap)
-		fmt.Printf("Info (applyCurrentLapToHistory): Added lap %d for driver %s.\n", newCompletedLap.Lap, driverNum)
+		// fmt.Printf("Info (applyCurrentLapToHistory): Added lap %d for driver %s.\n", newCompletedLap.Lap, driverNum)
 	}
 
 	gs.R.LapHistoryMap[driverNum] = lapHistory
