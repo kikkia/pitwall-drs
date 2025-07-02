@@ -155,7 +155,7 @@ func runReplayLogic() {
 	file, err := os.Open(recordingFilePath)
 	if err != nil {
 		log.Printf("ERROR: Failed to open recording file '%s': %v", recordingFilePath, err)
-		return // Cannot proceed without the file
+		return
 	}
 	defer file.Close()
 
@@ -249,10 +249,17 @@ func processAndBroadcastMessage(payload []byte) {
 								// Check if the event is "ExtrapolatedClock" and replace its timestamp
 								if len(args) > 0 {
 									if eventName, isString := args[0].(string); isString && eventName == "ExtrapolatedClock" {
-										if len(args) > 2 {
-											// Replace the timestamp with the current UTC timestamp
-											args[2] = time.Now().UTC().Format(time.RFC3339Nano)
-											log.Printf("Replaced ExtrapolatedClock timestamp with current time: %s", args[2])
+										if len(args) > 1 {
+											if clockData, ok := args[1].(map[string]interface{}); ok {
+												now := time.Now().UTC().Format(time.RFC3339Nano)
+												clockData["Utc"] = now
+												log.Printf("Replaced ExtrapolatedClock 'Utc' property with current time: %s", now)
+
+												// The third argument is also a timestamp, let's update it as well to be consistent.
+												if len(args) > 2 {
+													args[2] = now
+												}
+											}
 										}
 									}
 								}
