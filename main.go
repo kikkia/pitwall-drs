@@ -37,7 +37,7 @@ var (
 )
 
 func init() {
-	flag.BoolVar(&autoConnect, "auto-connect", false, "Automatically connect/disconnect to F1TV based on session times")
+	flag.BoolVar(&autoConnect, "auto-connect", true, "Automatically connect/disconnect to F1TV based on session times")
 }
 
 func main() {
@@ -295,42 +295,60 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 func joinWithNewlines(lines []string) string {
 	return fmt.Sprint(strings.Join(lines, "\n"))
 }
+func resetGlobalState() {
+	if globalState != nil {
+		fmt.Println("Resetting global state for new connection.")
+	}
+	globalState = model.NewEmptyGlobalState()
+	globalState.LapBroadcaster = lapHistoryBroadcaster
+}
+
+// findActiveEvent checks the schedule for a currently active event based on now time and buffer.
+func findActiveEvent(schedule *model.SeasonSchedule, now time.Time, buffer time.Duration) *model.Event {
+	for _, event := range schedule.Events {
+		connectTime := event.StartTime.Add(-buffer)
+		disconnectTime := event.EndTime.Add(buffer)
+
+		if now.After(connectTime) && now.Before(disconnectTime) {
+			return &event
+		}
+	}
+	return nil
+}
+
+// checkAndManageConnection contains the core logic for deciding whether to connect or disconnect.
+func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLoader) {
+	const bufferDuration = 1 * time.Hour // Connect 1hr before, disconnect 1hr after
+	now := time.Now()
+	schedule := loader.GetSeasonSchedule()
+
+	activeEvent := findActiveEvent(&schedule, now, bufferDuration)
+
+	if activeEvent != nil {
+		if !client.IsRunning() {
+			fmt.Printf("Session '%s' is active. Connecting to F1TV client...\n", activeEvent.Summary)
+			resetGlobalState()
+			client.Start()
+		}
+	} else {
+		if client.IsRunning() {
+			fmt.Println("No active session. Disconnecting F1TV client...")
+			client.Stop()
+		}
+	}
+}
 
 func manageF1TVConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLoader) {
 	const checkInterval = 1 * time.Minute
-	const bufferDuration = 1 * time.Hour // Connect 1hr before, disconnect 1hr after
 
-	ticker := time.NewTicker(checkInterval) // TODO: On start 1 min delay???
+	// Run once immediately on start to avoid initial delay
+	checkAndManageConnection(client, loader)
+
+	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		now := time.Now()
-		schedule := loader.GetSeasonSchedule()
-
-		var activeEvent *model.Event
-		for _, event := range schedule.Events {
-			connectTime := event.StartTime.Add(-bufferDuration)
-			disconnectTime := event.EndTime.Add(bufferDuration)
-
-			if now.After(connectTime) && now.Before(disconnectTime) {
-				activeEvent = &event
-				break
-			}
-		}
-
-		if activeEvent != nil {
-			if !client.IsRunning() {
-				fmt.Printf("Session '%s' is active. Connecting to F1TV client...\n", activeEvent.Summary)
-				// Clear state to make way for new connection
-
-				client.Start()
-			}
-		} else {
-			if client.IsRunning() {
-				fmt.Println("No active session. Disconnecting F1TV client...")
-				client.Stop()
-			}
-		}
+		checkAndManageConnection(client, loader)
 	}
 }
 
