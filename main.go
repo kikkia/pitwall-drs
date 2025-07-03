@@ -100,6 +100,20 @@ func main() {
 
 	if autoConnect {
 		fmt.Println("Auto-connect mode enabled. F1TV client will connect/disconnect based on session times.")
+		// TODO: Replace with valKey states for each session stored on finish
+		// TODO: Then grab the latest for data
+		checkAndManageConnection(f1tvClient, seasonLoader)
+
+		// If no active event, connect for 5 seconds to populate global state
+		if globalState == nil || globalState.R.SessionInfo == nil {
+			fmt.Println("No active session found on startup. Connecting for 5 seconds to populate initial state.")
+			resetGlobalState()
+			f1tvClient.Start()
+			time.Sleep(5 * time.Second)
+			f1tvClient.Stop()
+			fmt.Println("Initial 5-second connection complete.")
+		}
+
 		go manageF1TVConnection(f1tvClient, seasonLoader)
 	} else {
 		fmt.Println("Auto-connect mode disabled. F1TV client starting immediately.")
