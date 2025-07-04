@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 import (
@@ -17,7 +19,7 @@ import (
 
 const (
 	replayListenAddr  = "localhost:8080"
-	recordingFilePath = "recordings/Austrian_Grand_Prix_recordings/Austrian_Grand_Prix/Qualifying.txt"
+	recordingFilePath = "recordings/f1tv_events_sa_race.txt"
 	startDelay        = 5 * time.Second
 
 	timestampLayout            = time.RFC3339
@@ -25,7 +27,7 @@ const (
 )
 
 var (
-	timeFactor int64 = 1
+	timeFactor int64 = 5
 
 	globalState           *model.GlobalState
 	browserBroadcaster    *broadcaster.Broadcaster
@@ -218,7 +220,7 @@ func runReplayLogic() {
 	processAndBroadcastMessage(firstMsg.Payload)
 	previousTimestamp = firstMsg.Timestamp
 
-	raceStart, err := time.Parse(timestampLayout, "2025-06-01T22:03:36+09:00")
+	raceStart, err := time.Parse(timestampLayout, "2025-04-21T02:02:40+09:00")
 	if err != nil {
 		log.Printf("REEEEE %s", err)
 		return
