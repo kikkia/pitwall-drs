@@ -104,15 +104,15 @@ func main() {
 		// TODO: Then grab the latest for data
 		checkAndManageConnection(f1tvClient, seasonLoader)
 
-		// If no active event, connect for 5 seconds to populate global state
-		if globalState == nil || globalState.R.SessionInfo == nil {
-			fmt.Println("No active session found on startup. Connecting for 5 seconds to populate initial state.")
-			resetGlobalState()
-			f1tvClient.Start()
-			time.Sleep(5 * time.Second)
-			f1tvClient.Stop()
-			fmt.Println("Initial 5-second connection complete.")
-		}
+		// // If no active event, connect for 5 seconds to populate global state
+		// if globalState == nil || globalState.R.SessionInfo == nil {
+		// 	fmt.Println("No active session found on startup. Connecting for 5 seconds to populate initial state.")
+		// 	resetGlobalState()
+		// 	f1tvClient.Start()
+		// 	time.Sleep(5 * time.Second)
+		// 	f1tvClient.Stop()
+		// 	fmt.Println("Initial 5-second connection complete.")
+		// }
 
 		go manageF1TVConnection(f1tvClient, seasonLoader)
 	} else {
@@ -332,7 +332,7 @@ func findActiveEvent(schedule *model.SeasonSchedule, now time.Time, buffer time.
 
 // checkAndManageConnection contains the core logic for deciding whether to connect or disconnect.
 func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLoader) {
-	const bufferDuration = 1 * time.Hour // Connect 1hr before, disconnect 1hr after
+	const bufferDuration = 14 * time.Minute
 	now := time.Now()
 	schedule := loader.GetSeasonSchedule()
 
