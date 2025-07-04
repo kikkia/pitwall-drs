@@ -41,7 +41,7 @@ var (
 
 func init() {
 	flag.BoolVar(&autoConnect, "auto-connect", true, "Automatically connect/disconnect to F1TV based on session times")
-	flag.StringVar(&valkeyAddr, "valkey-addr", "", "Address for the Valkey instance. If not set, Valkey is disabled.")
+	flag.StringVar(&valkeyAddr, "valkey-addr", os.Getenv("VALKEY_ADDR"), "Address for the Valkey instance. If not set, Valkey is disabled. Can also be set via VALKEY_ADDR env var.")
 }
 
 func main() {

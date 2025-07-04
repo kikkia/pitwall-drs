@@ -7,6 +7,8 @@ services:
       - "8080:8080"
     volumes:
       - socket-proxy-recordings:/app/recordings
+    environment:
+      - VALKEY_ADDR=${VALKEY_ADDR}
     command: ["./socket-proxy", "--auto-connect=true"]
 
 volumes:
