@@ -372,7 +372,7 @@ type RaceData struct {
 type GlobalState struct {
 	R              RaceData `json:"R"`
 	mu             sync.RWMutex
-	LapBroadcaster LapUpdateBroadcaster
+	LapBroadcaster LapUpdateBroadcaster `json:"-"`
 }
 
 // Intermediate struct specifically for marshalling to match F1's R object format

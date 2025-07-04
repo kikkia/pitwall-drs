@@ -13,10 +13,12 @@ import (
 
 	"path/filepath"
 
+	"context"
 	"f1sockets/broadcaster"
 	"f1sockets/f1tvclient"
 	"f1sockets/model"
 	"f1sockets/season"
+	"f1sockets/valkeyclient"
 )
 
 const (
@@ -34,10 +36,12 @@ var (
 	logFlushTicker = time.NewTicker(2 * time.Second)
 	RECORD_LOGS    = true
 	autoConnect    = false
+	valkeyAddr     string
 )
 
 func init() {
 	flag.BoolVar(&autoConnect, "auto-connect", true, "Automatically connect/disconnect to F1TV based on session times")
+	flag.StringVar(&valkeyAddr, "valkey-addr", "", "Address for the Valkey instance. If not set, Valkey is disabled.")
 }
 
 func main() {
@@ -51,6 +55,10 @@ func main() {
 	seasonLoader := season.NewSeasonLoader(24 * time.Hour)
 	seasonLoader.Start()
 	defer seasonLoader.Stop()
+
+	fmt.Println("Waiting for initial season data to load...")
+	seasonLoader.WaitUntilReady()
+	fmt.Println("Season data loaded.")
 
 	f1tvClient := f1tvclient.NewF1TVClient(func(message []byte) {
 		if RECORD_LOGS && (globalState == nil || !globalState.IsSessionFinished()) {
@@ -100,21 +108,15 @@ func main() {
 
 	if autoConnect {
 		fmt.Println("Auto-connect mode enabled. F1TV client will connect/disconnect based on session times.")
-		// TODO: Replace with valKey states for each session stored on finish
-		// TODO: Then grab the latest for data
-		checkAndManageConnection(f1tvClient, seasonLoader)
+		var valkey *valkeyclient.ValkeyClient
+		if valkeyAddr != "" {
+			fmt.Printf("Valkey integration enabled, connecting to %s\n", valkeyAddr)
+			valkey = valkeyclient.NewValkeyClient(valkeyAddr)
+		}
 
-		// // If no active event, connect for 5 seconds to populate global state
-		// if globalState == nil || globalState.R.SessionInfo == nil {
-		// 	fmt.Println("No active session found on startup. Connecting for 5 seconds to populate initial state.")
-		// 	resetGlobalState()
-		// 	f1tvClient.Start()
-		// 	time.Sleep(5 * time.Second)
-		// 	f1tvClient.Stop()
-		// 	fmt.Println("Initial 5-second connection complete.")
-		// }
+		checkAndManageConnection(f1tvClient, seasonLoader, valkey)
 
-		go manageF1TVConnection(f1tvClient, seasonLoader)
+		go manageF1TVConnection(f1tvClient, seasonLoader, valkey)
 	} else {
 		fmt.Println("Auto-connect mode disabled. F1TV client starting immediately.")
 		f1tvClient.Start()
@@ -331,7 +333,7 @@ func findActiveEvent(schedule *model.SeasonSchedule, now time.Time, buffer time.
 }
 
 // checkAndManageConnection contains the core logic for deciding whether to connect or disconnect.
-func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLoader) {
+func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLoader, valkey *valkeyclient.ValkeyClient) {
 	const bufferDuration = 14 * time.Minute
 	now := time.Now()
 	schedule := loader.GetSeasonSchedule()
@@ -347,22 +349,44 @@ func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *season.Seas
 	} else {
 		if client.IsRunning() {
 			fmt.Println("No active session. Disconnecting F1TV client...")
+			if valkey != nil && globalState != nil {
+				err := valkey.SaveState(context.Background(), globalState)
+				if err != nil {
+					fmt.Printf("Error saving state to Valkey: %v\n", err)
+				} else {
+					fmt.Println("Global state saved to Valkey.")
+				}
+			}
 			client.Stop()
+		} else if valkey != nil {
+			// No active event and client is not running, try to load from Valkey
+			if globalState == nil || globalState.R.SessionInfo == nil {
+				fmt.Println("No active session, loading latest state from Valkey...")
+				loadedState, err := valkey.LoadLatestState(context.Background())
+				if err != nil {
+					fmt.Printf("Error loading state from Valkey: %v\n", err)
+				} else if loadedState != nil {
+					globalState = loadedState
+					fmt.Println("Successfully loaded latest state from Valkey.")
+				} else {
+					fmt.Println("No previous state found in Valkey.")
+				}
+			}
 		}
 	}
 }
 
-func manageF1TVConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLoader) {
+func manageF1TVConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLoader, valkey *valkeyclient.ValkeyClient) {
 	const checkInterval = 1 * time.Minute
 
 	// Run once immediately on start to avoid initial delay
-	checkAndManageConnection(client, loader)
+	checkAndManageConnection(client, loader, valkey)
 
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		checkAndManageConnection(client, loader)
+		checkAndManageConnection(client, loader, valkey)
 	}
 }
 

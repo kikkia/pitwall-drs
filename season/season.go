@@ -19,12 +19,15 @@ type SeasonLoader struct {
 	loadInterval time.Duration
 	stopChan     chan struct{}
 	wg           sync.WaitGroup
+	initialLoad  sync.Once
+	readyChan    chan struct{}
 }
 
 func NewSeasonLoader(interval time.Duration) *SeasonLoader {
 	return &SeasonLoader{
 		loadInterval: interval,
 		stopChan:     make(chan struct{}),
+		readyChan:    make(chan struct{}),
 	}
 }
 
@@ -58,6 +61,7 @@ func (s *SeasonLoader) run() {
 }
 
 func (s *SeasonLoader) loadData() {
+	defer s.initialLoad.Do(func() { close(s.readyChan) })
 	fmt.Println("Fetching F1 season data...")
 	resp, err := http.Get(seasonCalendarURL)
 	if err != nil {
@@ -119,4 +123,8 @@ func (s *SeasonLoader) loadData() {
 
 func (s *SeasonLoader) GetSeasonSchedule() model.SeasonSchedule {
 	return s.schedule
+}
+
+func (s *SeasonLoader) WaitUntilReady() {
+	<-s.readyChan
 }
