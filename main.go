@@ -367,6 +367,7 @@ func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *season.Seas
 					fmt.Printf("Error loading state from Valkey: %v\n", err)
 				} else if loadedState != nil {
 					globalState = loadedState
+					globalState.LapBroadcaster = lapHistoryBroadcaster
 					fmt.Println("Successfully loaded latest state from Valkey.")
 				} else {
 					fmt.Println("No previous state found in Valkey.")
