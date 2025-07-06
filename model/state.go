@@ -203,7 +203,7 @@ type TeamRadioCapture struct {
 }
 
 type TeamRadioData struct {
-	Captures []TeamRadioCapture `json:"Captures"`
+	Captures map[string]TeamRadioCapture `json:"Captures"`
 }
 
 type ChampionshipPredictionData struct {
@@ -455,7 +455,7 @@ func NewEmptyGlobalState() *GlobalState {
 			},
 
 			TeamRadio: &TeamRadioData{
-				Captures: make([]TeamRadioCapture, 0),
+				Captures: make(map[string]TeamRadioCapture),
 			},
 			ChampionshipPrediction: &ChampionshipPredictionData{
 				Drivers: make(map[string]DriverPrediction),
@@ -536,7 +536,7 @@ func NewGlobalState(initialJsonData []byte, broadcaster LapUpdateBroadcaster) (*
 		"CarData.z":              &newState.R.CarDataZ,
 		"Position.z":             &newState.R.PositionZ,
 		"TyreStintSeries":        &newState.R.TyreStintSeries,
-		"TeamRadio":              newState.R.TeamRadio,
+		"TeamRadio":              &newState.R.TeamRadio,
 		"ChampionshipPrediction": &newState.R.ChampionshipPrediction,
 		"LapCount":               newState.R.LapCount,
 	}
@@ -918,40 +918,25 @@ func (gs *GlobalState) updateRaceControlMessages(payloadBytes []byte) error {
 }
 
 func (gs *GlobalState) updateTeamRadio(payloadBytes []byte) error {
-	capturesResult := gjson.GetBytes(payloadBytes, "Captures")
-	if !capturesResult.Exists() {
+	var updatePayload struct {
+		Captures map[string]TeamRadioCapture `json:"Captures"`
+	}
+	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
+		// This can happen if the payload is an empty array `[]` instead of an object
 		return nil
 	}
 
 	if gs.R.TeamRadio == nil {
 		gs.R.TeamRadio = &TeamRadioData{
-			Captures: make([]TeamRadioCapture, 0),
+			Captures: make(map[string]TeamRadioCapture),
 		}
 	}
+	if gs.R.TeamRadio.Captures == nil {
+		gs.R.TeamRadio.Captures = make(map[string]TeamRadioCapture)
+	}
 
-	if capturesResult.IsArray() {
-		var newCaptures []TeamRadioCapture
-		if err := json.Unmarshal([]byte(capturesResult.Raw), &newCaptures); err != nil {
-			fmt.Printf("Warning: Failed to unmarshal TeamRadio Captures array: %v. Raw: %s\n", err, capturesResult.Raw)
-			return nil
-		}
-		gs.R.TeamRadio.Captures = append(gs.R.TeamRadio.Captures, newCaptures...)
-	} else if capturesResult.IsObject() {
-		var captureUpdates map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(capturesResult.Raw), &captureUpdates); err != nil {
-			fmt.Printf("Warning: Failed to unmarshal TeamRadio Captures map: %v. Raw: %s\n", err, capturesResult.Raw)
-			return nil
-		}
-		for _, rawCapture := range captureUpdates {
-			var capture TeamRadioCapture
-			if err := json.Unmarshal(rawCapture, &capture); err != nil {
-				fmt.Printf("Warning: Failed to unmarshal individual TeamRadio capture: %v. Raw: %s\n", err, string(rawCapture))
-				continue
-			}
-			gs.R.TeamRadio.Captures = append(gs.R.TeamRadio.Captures, capture)
-		}
-	} else {
-		fmt.Printf("Warning: Unhandled data type for TeamRadio.Captures: %s\n", capturesResult.Type)
+	for key, capture := range updatePayload.Captures {
+		gs.R.TeamRadio.Captures[key] = capture
 	}
 
 	return nil
