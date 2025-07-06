@@ -31,12 +31,14 @@ var (
 )
 
 var (
-	logBuffer      = make([]string, 0, 1000)
-	logBufferMutex sync.Mutex
-	logFlushTicker = time.NewTicker(2 * time.Second)
-	RECORD_LOGS    = true
-	autoConnect    = false
-	valkeyAddr     string
+	logBuffer          = make([]string, 0, 1000)
+	logBufferMutex     sync.Mutex
+	logFlushTicker     = time.NewTicker(2 * time.Second)
+	RECORD_LOGS        = true
+	autoConnect        = false
+	valkeyAddr         string
+	skippedFeedUpdates = 0
+	f1tvClient         *f1tvclient.F1TVClient
 )
 
 func init() {
@@ -60,7 +62,7 @@ func main() {
 	seasonLoader.WaitUntilReady()
 	fmt.Println("Season data loaded.")
 
-	f1tvClient := f1tvclient.NewF1TVClient(func(message []byte) {
+	f1tvClient = f1tvclient.NewF1TVClient(func(message []byte) {
 		if RECORD_LOGS && (globalState == nil || !globalState.IsSessionFinished()) {
 			logEntry := fmt.Sprintf("[%s] %s\n", time.Now().Format(time.RFC3339), message)
 			logBufferMutex.Lock()
@@ -76,6 +78,9 @@ func main() {
 				globalState, err = model.NewGlobalState(message, lapHistoryBroadcaster)
 				if err != nil {
 					fmt.Printf("Failed to parse global state message: %v\n", err)
+				} else {
+					// Reset the counter on successful global state initialization
+					skippedFeedUpdates = 0
 				}
 			}
 			if mArray, ok := signalRMessage["M"].([]interface{}); ok {
@@ -90,8 +95,16 @@ func main() {
 										if err != nil {
 											fmt.Printf("Failed to apply feed update: %v\n Update Args: %v\n", err, args)
 										}
+										// Reset counter on any feed update attempt when global state is present
+										skippedFeedUpdates = 0
 									} else {
 										fmt.Println("Skipping feed update as global state is not yet initialized.")
+										skippedFeedUpdates++
+										if skippedFeedUpdates >= 20 {
+											fmt.Println("20 consecutive feed updates skipped, restarting F1TV client.")
+											f1tvClient.ForceReconnect()
+											skippedFeedUpdates = 0 // Reset after triggering reconnect
+										}
 									}
 								}
 							}

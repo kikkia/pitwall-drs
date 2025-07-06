@@ -113,6 +113,14 @@ func (c *F1TVClient) IsRunning() bool {
 	return c.isRunning
 }
 
+// ForceReconnect closes the websocket connection, which will trigger the run() loop to reconnect.
+func (c *F1TVClient) ForceReconnect() {
+	if c.conn != nil {
+		fmt.Println("Forcing reconnection by closing the websocket.")
+		c.conn.Close()
+	}
+}
+
 func (c *F1TVClient) readMessages() {
 	defer func() {
 		if c.conn != nil {
