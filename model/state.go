@@ -196,6 +196,12 @@ type RaceControlMessage struct {
 	RacingNumber string `json:"RacingNumber,omitempty"`
 }
 
+type TeamRadioCapture struct {
+	Utc          string `json:"Utc"`
+	RacingNumber string `json:"RacingNumber"`
+	Path         string `json:"Path"`
+}
+
 type SessionInfoData struct {
 	Meeting       MeetingInfo       `json:"Meeting"`
 	ArchiveStatus ArchiveStatusInfo `json:"ArchiveStatus"`
@@ -361,6 +367,7 @@ type RaceData struct {
 	SessionData         *SessionData       `json:"SessionData,omitempty"`
 	TimingData          *TimingData        `json:"TimingData,omitempty"`
 	TyreStintSeries     *TyreStintSeries   `json:"TyreStintSeries,omitempty"`
+	TeamRadioCaptures   []TeamRadioCapture `json:"TeamRadio,omitempty"`
 
 	DriverList    map[string]DriverInfo       `json:"DriverList,omitempty"`
 	CarDataZ      string                      `json:"CarData.z,omitempty"`
@@ -392,6 +399,7 @@ type raceDataForJSON struct {
 	SessionData         *SessionData                `json:"SessionData,omitempty"`
 	TimingData          *TimingData                 `json:"TimingData,omitempty"`
 	TyreStintSeries     *TyreStintSeries            `json:"TyreStintSeries,omitempty"`
+	TeamRadioCaptures   []TeamRadioCapture          `json:"TeamRadio,omitempty"`
 	LapCount            *LapCount                   `json:LapCount,omitempty`
 	LapHistoryMap       map[string]DriverLapHistory `json:LapHistoryMap`
 }
@@ -425,9 +433,10 @@ func NewEmptyGlobalState() *GlobalState {
 				NoEntries: make([]int, 0),
 			},
 
-			DriverList:    make(map[string]DriverInfo),
-			LapCount:      &LapCount{},
-			LapHistoryMap: make(map[string]DriverLapHistory),
+			TeamRadioCaptures: make([]TeamRadioCapture, 0),
+			DriverList:        make(map[string]DriverInfo),
+			LapCount:          &LapCount{},
+			LapHistoryMap:     make(map[string]DriverLapHistory),
 		},
 		LapBroadcaster: nil, // Will be set by NewGlobalState or main
 	}
@@ -500,6 +509,7 @@ func NewGlobalState(initialJsonData []byte, broadcaster LapUpdateBroadcaster) (*
 		"CarData.z":           &newState.R.CarDataZ,
 		"Position.z":          &newState.R.PositionZ,
 		"TyreStintSeries":     &newState.R.TyreStintSeries,
+		"TeamRadio":           &newState.R.TeamRadioCaptures,
 		"LapCount":            newState.R.LapCount,
 	}
 
@@ -610,6 +620,8 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		return gs.updateTimingData(payloadBytes)
 	case "TyreStintSeries":
 		return gs.updateTyreStintSeries(payloadBytes)
+	case "TeamRadio":
+		return gs.updateTeamRadio(payloadBytes)
 	default:
 		fmt.Printf("Warning: Unhandled feed update for field: %s\n", fieldName)
 	}
@@ -678,7 +690,7 @@ func (gs *GlobalState) updateTopThree(payloadBytes []byte) error {
 	linesResult := gjson.GetBytes(payloadBytes, "Lines")
 
 	if !linesResult.Exists() {
-		return nil // No "Lines" field in the update
+		return nil
 	}
 
 	if linesResult.IsArray() {
@@ -875,6 +887,44 @@ func (gs *GlobalState) updateRaceControlMessages(payloadBytes []byte) error {
 	return nil
 }
 
+func (gs *GlobalState) updateTeamRadio(payloadBytes []byte) error {
+	capturesResult := gjson.GetBytes(payloadBytes, "Captures")
+	if !capturesResult.Exists() {
+		return nil
+	}
+
+	if gs.R.TeamRadioCaptures == nil {
+		gs.R.TeamRadioCaptures = make([]TeamRadioCapture, 0)
+	}
+
+	if capturesResult.IsArray() {
+		var newCaptures []TeamRadioCapture
+		if err := json.Unmarshal([]byte(capturesResult.Raw), &newCaptures); err != nil {
+			fmt.Printf("Warning: Failed to unmarshal TeamRadio Captures array: %v. Raw: %s\n", err, capturesResult.Raw)
+			return nil
+		}
+		gs.R.TeamRadioCaptures = append(gs.R.TeamRadioCaptures, newCaptures...)
+	} else if capturesResult.IsObject() {
+		var captureUpdates map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(capturesResult.Raw), &captureUpdates); err != nil {
+			fmt.Printf("Warning: Failed to unmarshal TeamRadio Captures map: %v. Raw: %s\n", err, capturesResult.Raw)
+			return nil
+		}
+		for _, rawCapture := range captureUpdates {
+			var capture TeamRadioCapture
+			if err := json.Unmarshal(rawCapture, &capture); err != nil {
+				fmt.Printf("Warning: Failed to unmarshal individual TeamRadio capture: %v. Raw: %s\n", err, string(rawCapture))
+				continue
+			}
+			gs.R.TeamRadioCaptures = append(gs.R.TeamRadioCaptures, capture)
+		}
+	} else {
+		fmt.Printf("Warning: Unhandled data type for TeamRadio.Captures: %s\n", capturesResult.Type)
+	}
+
+	return nil
+}
+
 func (gs *GlobalState) updateSessionData(payloadBytes []byte) error {
 	var updatePayload struct {
 		Series       map[string]json.RawMessage `json:"Series,omitempty"`
@@ -1068,6 +1118,7 @@ func (gs *GlobalState) GetStateAsJSON() ([]byte, error) {
 		SessionData:         gs.R.SessionData,
 		TimingData:          gs.R.TimingData,
 		TyreStintSeries:     gs.R.TyreStintSeries,
+		TeamRadioCaptures:   gs.R.TeamRadioCaptures,
 		LapCount:            gs.R.LapCount,
 		LapHistoryMap:       gs.R.LapHistoryMap,
 	}
