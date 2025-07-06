@@ -734,12 +734,23 @@ func (gs *GlobalState) updateTimingStats(payloadBytes []byte) error {
 			if err != nil {
 				fmt.Printf("Warning: Failed to marshal BestSectors for driver %s: %v\n", driverNumber, err)
 			} else {
-				var bestSectorsMap map[string]json.RawMessage
-				if err := json.Unmarshal(bestSectorsBytes, &bestSectorsMap); err != nil {
-					fmt.Printf("Warning: Failed to unmarshal BestSectors map for driver %s: %v - %s\n", driverNumber, err, bestSectorsBytes)
-				} else {
-					if err := applyMapUpdatesToSlice(&existingStats.BestSectors, bestSectorsMap); err != nil {
-						fmt.Printf("Warning: Error applying BestSectors updates for driver %s: %v\n", driverNumber, err)
+				result := gjson.ParseBytes(bestSectorsBytes)
+				// Checks between a full array replace or the indexed based updates
+				if result.IsArray() {
+					var bestSectorsSlice []SectorOrSpeedInfo
+					if err := json.Unmarshal(bestSectorsBytes, &bestSectorsSlice); err != nil {
+						fmt.Printf("Warning: Failed to unmarshal BestSectors array for driver %s: %v\n", driverNumber, err)
+					} else {
+						existingStats.BestSectors = bestSectorsSlice
+					}
+				} else if result.IsObject() {
+					var bestSectorsMap map[string]json.RawMessage
+					if err := json.Unmarshal(bestSectorsBytes, &bestSectorsMap); err != nil {
+						fmt.Printf("Warning: Failed to unmarshal BestSectors map for driver %s: %v - %s\n", driverNumber, err, string(bestSectorsBytes))
+					} else {
+						if err := applyMapUpdatesToSlice(&existingStats.BestSectors, bestSectorsMap); err != nil {
+							fmt.Printf("Warning: Error applying BestSectors updates for driver %s: %v\n", driverNumber, err)
+						}
 					}
 				}
 			}
