@@ -202,6 +202,21 @@ type TeamRadioCapture struct {
 	Path         string `json:"Path"`
 }
 
+type ChampionshipPredictionData struct {
+	Drivers map[string]DriverPrediction `json:"Drivers"`
+	Teams   map[string]TeamPrediction   `json:"Teams"`
+}
+
+type DriverPrediction struct {
+	PredictedPoints   *float64 `json:"PredictedPoints,omitempty"`
+	PredictedPosition *int     `json:"PredictedPosition,omitempty"`
+}
+
+type TeamPrediction struct {
+	PredictedPoints   *float64 `json:"PredictedPoints,omitempty"`
+	PredictedPosition *int     `json:"PredictedPosition,omitempty"`
+}
+
 type SessionInfoData struct {
 	Meeting       MeetingInfo       `json:"Meeting"`
 	ArchiveStatus ArchiveStatusInfo `json:"ArchiveStatus"`
@@ -355,19 +370,20 @@ type DriverLapHistory struct {
 }
 
 type RaceData struct {
-	Heartbeat           *Heartbeat         `json:"Heartbeat,omitempty"`
-	ExtrapolatedClock   *ExtrapolatedClock `json:"ExtrapolatedClock,omitempty"`
-	WeatherData         *WeatherData       `json:"WeatherData,omitempty"`
-	TrackStatus         *TrackStatus       `json:"TrackStatus,omitempty"`
-	TopThree            *TopThreeData      `json:"TopThree,omitempty"`
-	TimingStats         *TimingStatsData   `json:"TimingStats,omitempty"`
-	TimingAppData       *TimingAppData     `json:"TimingAppData,omitempty"`
-	RaceControlMessages *RaceControlData   `json:"RaceControlMessages,omitempty"`
-	SessionInfo         *SessionInfoData   `json:"SessionInfo,omitempty"`
-	SessionData         *SessionData       `json:"SessionData,omitempty"`
-	TimingData          *TimingData        `json:"TimingData,omitempty"`
-	TyreStintSeries     *TyreStintSeries   `json:"TyreStintSeries,omitempty"`
-	TeamRadioCaptures   []TeamRadioCapture `json:"TeamRadio,omitempty"`
+	Heartbeat              *Heartbeat                  `json:"Heartbeat,omitempty"`
+	ExtrapolatedClock      *ExtrapolatedClock          `json:"ExtrapolatedClock,omitempty"`
+	WeatherData            *WeatherData                `json:"WeatherData,omitempty"`
+	TrackStatus            *TrackStatus                `json:"TrackStatus,omitempty"`
+	TopThree               *TopThreeData               `json:"TopThree,omitempty"`
+	TimingStats            *TimingStatsData            `json:"TimingStats,omitempty"`
+	TimingAppData          *TimingAppData              `json:"TimingAppData,omitempty"`
+	RaceControlMessages    *RaceControlData            `json:"RaceControlMessages,omitempty"`
+	SessionInfo            *SessionInfoData            `json:"SessionInfo,omitempty"`
+	SessionData            *SessionData                `json:"SessionData,omitempty"`
+	TimingData             *TimingData                 `json:"TimingData,omitempty"`
+	TyreStintSeries        *TyreStintSeries            `json:"TyreStintSeries,omitempty"`
+	TeamRadioCaptures      []TeamRadioCapture          `json:"TeamRadio,omitempty"`
+	ChampionshipPrediction *ChampionshipPredictionData `json:"ChampionshipPrediction,omitempty"`
 
 	DriverList    map[string]DriverInfo       `json:"DriverList,omitempty"`
 	CarDataZ      string                      `json:"CarData.z,omitempty"`
@@ -384,24 +400,25 @@ type GlobalState struct {
 
 // Intermediate struct specifically for marshalling to match F1's R object format
 type raceDataForJSON struct {
-	Heartbeat           *Heartbeat                  `json:"Heartbeat,omitempty"`
-	CarDataZ            string                      `json:"CarData.z,omitempty"`  // Correct tag for output
-	PositionZ           string                      `json:"Position.z,omitempty"` // Correct tag for output
-	ExtrapolatedClock   *ExtrapolatedClock          `json:"ExtrapolatedClock,omitempty"`
-	TopThree            *TopThreeData               `json:"TopThree,omitempty"`
-	TimingStats         *TimingStatsData            `json:"TimingStats,omitempty"`
-	TimingAppData       *TimingAppData              `json:"TimingAppData,omitempty"`
-	WeatherData         *WeatherData                `json:"WeatherData,omitempty"`
-	TrackStatus         *TrackStatus                `json:"TrackStatus,omitempty"`
-	DriverList          map[string]DriverInfo       `json:"DriverList,omitempty"`
-	RaceControlMessages *RaceControlData            `json:"RaceControlMessages,omitempty"`
-	SessionInfo         *SessionInfoData            `json:"SessionInfo,omitempty"`
-	SessionData         *SessionData                `json:"SessionData,omitempty"`
-	TimingData          *TimingData                 `json:"TimingData,omitempty"`
-	TyreStintSeries     *TyreStintSeries            `json:"TyreStintSeries,omitempty"`
-	TeamRadioCaptures   []TeamRadioCapture          `json:"TeamRadio,omitempty"`
-	LapCount            *LapCount                   `json:LapCount,omitempty`
-	LapHistoryMap       map[string]DriverLapHistory `json:LapHistoryMap`
+	Heartbeat              *Heartbeat                  `json:"Heartbeat,omitempty"`
+	CarDataZ               string                      `json:"CarData.z,omitempty"`  // Correct tag for output
+	PositionZ              string                      `json:"Position.z,omitempty"` // Correct tag for output
+	ExtrapolatedClock      *ExtrapolatedClock          `json:"ExtrapolatedClock,omitempty"`
+	TopThree               *TopThreeData               `json:"TopThree,omitempty"`
+	TimingStats            *TimingStatsData            `json:"TimingStats,omitempty"`
+	TimingAppData          *TimingAppData              `json:"TimingAppData,omitempty"`
+	WeatherData            *WeatherData                `json:"WeatherData,omitempty"`
+	TrackStatus            *TrackStatus                `json:"TrackStatus,omitempty"`
+	DriverList             map[string]DriverInfo       `json:"DriverList,omitempty"`
+	RaceControlMessages    *RaceControlData            `json:"RaceControlMessages,omitempty"`
+	SessionInfo            *SessionInfoData            `json:"SessionInfo,omitempty"`
+	SessionData            *SessionData                `json:"SessionData,omitempty"`
+	TimingData             *TimingData                 `json:"TimingData,omitempty"`
+	TyreStintSeries        *TyreStintSeries            `json:"TyreStintSeries,omitempty"`
+	TeamRadioCaptures      []TeamRadioCapture          `json:"TeamRadio,omitempty"`
+	ChampionshipPrediction *ChampionshipPredictionData `json:"ChampionshipPrediction,omitempty"`
+	LapCount               *LapCount                   `json:LapCount,omitempty`
+	LapHistoryMap          map[string]DriverLapHistory `json:LapHistoryMap`
 }
 
 func NewEmptyGlobalState() *GlobalState {
@@ -434,9 +451,13 @@ func NewEmptyGlobalState() *GlobalState {
 			},
 
 			TeamRadioCaptures: make([]TeamRadioCapture, 0),
-			DriverList:        make(map[string]DriverInfo),
-			LapCount:          &LapCount{},
-			LapHistoryMap:     make(map[string]DriverLapHistory),
+			ChampionshipPrediction: &ChampionshipPredictionData{
+				Drivers: make(map[string]DriverPrediction),
+				Teams:   make(map[string]TeamPrediction),
+			},
+			DriverList:    make(map[string]DriverInfo),
+			LapCount:      &LapCount{},
+			LapHistoryMap: make(map[string]DriverLapHistory),
 		},
 		LapBroadcaster: nil, // Will be set by NewGlobalState or main
 	}
@@ -494,23 +515,24 @@ func NewGlobalState(initialJsonData []byte, broadcaster LapUpdateBroadcaster) (*
 	}
 
 	fieldsToPopulate := map[string]interface{}{
-		"Heartbeat":           newState.R.Heartbeat,
-		"ExtrapolatedClock":   newState.R.ExtrapolatedClock,
-		"WeatherData":         newState.R.WeatherData,
-		"TrackStatus":         newState.R.TrackStatus,
-		"DriverList":          &newState.R.DriverList,
-		"TopThree":            newState.R.TopThree,
-		"TimingStats":         newState.R.TimingStats,
-		"TimingAppData":       newState.R.TimingAppData,
-		"RaceControlMessages": newState.R.RaceControlMessages,
-		"SessionInfo":         newState.R.SessionInfo,
-		"SessionData":         newState.R.SessionData,
-		"TimingData":          newState.R.TimingData,
-		"CarData.z":           &newState.R.CarDataZ,
-		"Position.z":          &newState.R.PositionZ,
-		"TyreStintSeries":     &newState.R.TyreStintSeries,
-		"TeamRadio":           &newState.R.TeamRadioCaptures,
-		"LapCount":            newState.R.LapCount,
+		"Heartbeat":              newState.R.Heartbeat,
+		"ExtrapolatedClock":      newState.R.ExtrapolatedClock,
+		"WeatherData":            newState.R.WeatherData,
+		"TrackStatus":            newState.R.TrackStatus,
+		"DriverList":             &newState.R.DriverList,
+		"TopThree":               newState.R.TopThree,
+		"TimingStats":            newState.R.TimingStats,
+		"TimingAppData":          newState.R.TimingAppData,
+		"RaceControlMessages":    newState.R.RaceControlMessages,
+		"SessionInfo":            newState.R.SessionInfo,
+		"SessionData":            newState.R.SessionData,
+		"TimingData":             newState.R.TimingData,
+		"CarData.z":              &newState.R.CarDataZ,
+		"Position.z":             &newState.R.PositionZ,
+		"TyreStintSeries":        &newState.R.TyreStintSeries,
+		"TeamRadio":              &newState.R.TeamRadioCaptures,
+		"ChampionshipPrediction": &newState.R.ChampionshipPrediction,
+		"LapCount":               newState.R.LapCount,
 	}
 
 	for key, target := range fieldsToPopulate {
@@ -622,6 +644,8 @@ func (gs *GlobalState) ApplyFeedUpdate(args []interface{}) error {
 		return gs.updateTyreStintSeries(payloadBytes)
 	case "TeamRadio":
 		return gs.updateTeamRadio(payloadBytes)
+	case "ChampionshipPrediction":
+		return gs.updateChampionshipPrediction(payloadBytes)
 	default:
 		fmt.Printf("Warning: Unhandled feed update for field: %s\n", fieldName)
 	}
@@ -920,6 +944,51 @@ func (gs *GlobalState) updateTeamRadio(payloadBytes []byte) error {
 		}
 	} else {
 		fmt.Printf("Warning: Unhandled data type for TeamRadio.Captures: %s\n", capturesResult.Type)
+	}
+
+	return nil
+}
+
+func (gs *GlobalState) updateChampionshipPrediction(payloadBytes []byte) error {
+	var updatePayload ChampionshipPredictionData
+	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
+		fmt.Printf("Warning: Failed to unmarshal ChampionshipPrediction payload: %v. Payload: %s\n", err, string(payloadBytes))
+		return nil
+	}
+
+	if gs.R.ChampionshipPrediction == nil {
+		gs.R.ChampionshipPrediction = &ChampionshipPredictionData{
+			Drivers: make(map[string]DriverPrediction),
+			Teams:   make(map[string]TeamPrediction),
+		}
+	}
+	if gs.R.ChampionshipPrediction.Drivers == nil {
+		gs.R.ChampionshipPrediction.Drivers = make(map[string]DriverPrediction)
+	}
+	if gs.R.ChampionshipPrediction.Teams == nil {
+		gs.R.ChampionshipPrediction.Teams = make(map[string]TeamPrediction)
+	}
+
+	for driverNum, driverUpdate := range updatePayload.Drivers {
+		existing := gs.R.ChampionshipPrediction.Drivers[driverNum]
+		if driverUpdate.PredictedPoints != nil {
+			existing.PredictedPoints = driverUpdate.PredictedPoints
+		}
+		if driverUpdate.PredictedPosition != nil {
+			existing.PredictedPosition = driverUpdate.PredictedPosition
+		}
+		gs.R.ChampionshipPrediction.Drivers[driverNum] = existing
+	}
+
+	for teamName, teamUpdate := range updatePayload.Teams {
+		existing := gs.R.ChampionshipPrediction.Teams[teamName]
+		if teamUpdate.PredictedPoints != nil {
+			existing.PredictedPoints = teamUpdate.PredictedPoints
+		}
+		if teamUpdate.PredictedPosition != nil {
+			existing.PredictedPosition = teamUpdate.PredictedPosition
+		}
+		gs.R.ChampionshipPrediction.Teams[teamName] = existing
 	}
 
 	return nil
