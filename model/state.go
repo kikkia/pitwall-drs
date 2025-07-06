@@ -656,32 +656,51 @@ func (gs *GlobalState) updateDriverList(payloadBytes []byte) error {
 }
 
 func (gs *GlobalState) updateTopThree(payloadBytes []byte) error {
-	type TopThreeUpdatePayload struct {
-		Lines       map[string]json.RawMessage `json:"Lines"`
-		SessionPart *int                       `json:"SessionPart,omitempty"`
-		Withheld    *bool                      `json:"Withheld,omitempty"`
-	}
-
-	var updatePayload TopThreeUpdatePayload
-	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
-		fmt.Printf("Warning: Failed to unmarshal TopThree payload into expected structure: %v. Payload: %s\n", err, string(payloadBytes))
-		return nil
-	}
-
 	if gs.R.TopThree == nil {
 		gs.R.TopThree = &TopThreeData{Lines: make([]TopThreeLine, 0)}
 	}
 
-	if updatePayload.SessionPart != nil {
-		gs.R.TopThree.SessionPart = *updatePayload.SessionPart
+	// Use a temporary struct to unmarshal fields other than "Lines"
+	type TopThreeMetadata struct {
+		SessionPart *int  `json:"SessionPart,omitempty"`
+		Withheld    *bool `json:"Withheld,omitempty"`
 	}
-	if updatePayload.Withheld != nil {
-		gs.R.TopThree.Withheld = *updatePayload.Withheld
+	var metadata TopThreeMetadata
+	// This unmarshal will extract SessionPart and Withheld, ignoring "Lines" if it's an array
+	_ = json.Unmarshal(payloadBytes, &metadata)
+	if metadata.SessionPart != nil {
+		gs.R.TopThree.SessionPart = *metadata.SessionPart
+	}
+	if metadata.Withheld != nil {
+		gs.R.TopThree.Withheld = *metadata.Withheld
 	}
 
-	if err := applyMapUpdatesToSlice(&gs.R.TopThree.Lines, updatePayload.Lines); err != nil {
-		fmt.Printf("Warning: Error applying TopThree updates: %v\n", err)
+	linesResult := gjson.GetBytes(payloadBytes, "Lines")
+
+	if !linesResult.Exists() {
+		return nil // No "Lines" field in the update
 	}
+
+	if linesResult.IsArray() {
+		var newLines []TopThreeLine
+		if err := json.Unmarshal([]byte(linesResult.Raw), &newLines); err != nil {
+			fmt.Printf("Warning: Failed to unmarshal TopThree Lines array: %v. Raw: %s\n", err, linesResult.Raw)
+			return nil
+		}
+		gs.R.TopThree.Lines = newLines
+	} else if linesResult.IsObject() {
+		var lineUpdates map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(linesResult.Raw), &lineUpdates); err != nil {
+			fmt.Printf("Warning: Failed to unmarshal TopThree Lines map: %v. Raw: %s\n", err, linesResult.Raw)
+			return nil
+		}
+		if err := applyMapUpdatesToSlice(&gs.R.TopThree.Lines, lineUpdates); err != nil {
+			fmt.Printf("Warning: Error applying TopThree map updates: %v\n", err)
+		}
+	} else {
+		fmt.Printf("Warning: Unhandled data type for TopThree.Lines: %s\n", linesResult.Type)
+	}
+
 	return nil
 }
 
@@ -954,7 +973,7 @@ func (gs *GlobalState) updateTimingData(payloadBytes []byte) error {
 			// lap to the history
 			if sector, exists := sliceUpdates.Sectors["2"]; exists {
 				if gjson.Get(string(sector), "Value").Exists() && gjson.Get(string(sector), "Value").Str != "" {
-					fmt.Printf("Update: %s", sliceUpdates.Sectors)
+					// fmt.Printf("Update: %s\n", sliceUpdates.Sectors)
 					gs.saveLapToHistory(driverNumber)
 				}
 			}
@@ -1199,7 +1218,7 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 		lapTime = "N/A"
 		hasPitted = true
 	} else {
-		fmt.Printf("Calculated laptime for %s: %s\n", driverNum, lapTime)
+		// fmt.Printf("Calculated laptime for %s: %s\n", driverNum, lapTime)
 	}
 
 	driverStints := gs.R.TimingAppData.Lines[driverNum].Stints
@@ -1228,7 +1247,7 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 		lapHistory.CompletedLaps[foundIndex] = newCompletedLap
 	} else {
 		lapHistory.CompletedLaps = append(lapHistory.CompletedLaps, newCompletedLap)
-		fmt.Printf("Info (applyCurrentLapToHistory): Added lap %d for driver %s.\n", newCompletedLap.Lap, driverNum)
+		// fmt.Printf("Info (applyCurrentLapToHistory): Added lap %d for driver %s.\n", newCompletedLap.Lap, driverNum)
 	}
 
 	gs.R.LapHistoryMap[driverNum] = lapHistory
