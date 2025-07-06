@@ -644,7 +644,6 @@ func (gs *GlobalState) updateDriverList(payloadBytes []byte) error {
 			gs.R.DriverList[driverNumber] = existingInfo
 			// fmt.Printf("Updated DriverList for driver %s: Line=%d\n", driverNumber, existingInfo.Line)
 		} else {
-			fmt.Printf("Warning: Received DriverList update for driver %s who is not in the current state. Update data: %s\n", driverNumber, string(rawUpdateData))
 			var newDriver DriverInfo
 			if err := json.Unmarshal(rawUpdateData, &newDriver); err != nil {
 				fmt.Printf("Warning: Failed to unmarshal new driver data for driver %s: %v. Data: %s\n", driverNumber, err, string(rawUpdateData))
@@ -981,10 +980,12 @@ func (gs *GlobalState) updateTimingData(payloadBytes []byte) error {
 }
 
 func (gs *GlobalState) updateTyreStintSeries(payloadBytes []byte) error {
-	var updatePayload struct {
-		Stints map[string]map[string]json.RawMessage `json:"Stints"`
+	var payload struct {
+		Stints map[string]json.RawMessage `json:"Stints"`
+		KF     bool                       `json:"_kf"` // To consume the _kf field
 	}
-	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
+
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		fmt.Printf("Warning: Failed to unmarshal TyreStintSeries payload: %v. Payload: %s\n", err, string(payloadBytes))
 		return nil
 	}
@@ -996,15 +997,32 @@ func (gs *GlobalState) updateTyreStintSeries(payloadBytes []byte) error {
 		gs.R.TyreStintSeries.Stints = make(map[string][]TyreStint)
 	}
 
-	for driverNumber, stintUpdates := range updatePayload.Stints {
+	for driverNumber, rawStintUpdate := range payload.Stints {
 		existingStints, found := gs.R.TyreStintSeries.Stints[driverNumber]
 		if !found {
 			existingStints = make([]TyreStint, 0)
 		}
-		if err := applyMapUpdatesToSlice(&existingStints, stintUpdates); err != nil {
-			fmt.Printf("Warning: Error applying TyreStint updates for driver %s: %v\n", driverNumber, err)
+
+		// Check if its a full array replace, or index based update
+		result := gjson.ParseBytes(rawStintUpdate)
+		if result.IsArray() {
+			var newStints []TyreStint
+			if err := json.Unmarshal(rawStintUpdate, &newStints); err != nil {
+				fmt.Printf("Warning: Failed to unmarshal full TyreStint array for driver %s: %v\n", driverNumber, err)
+				continue
+			}
+			gs.R.TyreStintSeries.Stints[driverNumber] = newStints
+		} else if result.IsObject() {
+			var stintUpdates map[string]json.RawMessage
+			if err := json.Unmarshal(rawStintUpdate, &stintUpdates); err != nil {
+				fmt.Printf("Warning: Failed to unmarshal partial TyreStint map for driver %s: %v\n", driverNumber, err)
+				continue
+			}
+			if err := applyMapUpdatesToSlice(&existingStints, stintUpdates); err != nil {
+				fmt.Printf("Warning: Error applying TyreStint updates for driver %s: %v\n", driverNumber, err)
+			}
+			gs.R.TyreStintSeries.Stints[driverNumber] = existingStints
 		}
-		gs.R.TyreStintSeries.Stints[driverNumber] = existingStints
 	}
 	return nil
 }
