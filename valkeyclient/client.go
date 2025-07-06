@@ -30,7 +30,7 @@ func (vc *ValkeyClient) SaveState(ctx context.Context, state *model.GlobalState)
 	timestamp := time.Now().Unix()
 	key := fmt.Sprintf("f1_global_state:%d", timestamp)
 
-	err = vc.client.Set(ctx, key, stateJSON, 24*time.Hour).Err()
+	err = vc.client.Set(ctx, key, stateJSON, 0*time.Hour).Err()
 	if err != nil {
 		return fmt.Errorf("failed to save state to Valkey: %w", err)
 	}

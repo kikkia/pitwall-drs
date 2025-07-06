@@ -202,6 +202,10 @@ type TeamRadioCapture struct {
 	Path         string `json:"Path"`
 }
 
+type TeamRadioData struct {
+	Captures []TeamRadioCapture `json:"Captures"`
+}
+
 type ChampionshipPredictionData struct {
 	Drivers map[string]DriverPrediction `json:"Drivers"`
 	Teams   map[string]TeamPrediction   `json:"Teams"`
@@ -382,7 +386,7 @@ type RaceData struct {
 	SessionData            *SessionData                `json:"SessionData,omitempty"`
 	TimingData             *TimingData                 `json:"TimingData,omitempty"`
 	TyreStintSeries        *TyreStintSeries            `json:"TyreStintSeries,omitempty"`
-	TeamRadioCaptures      []TeamRadioCapture          `json:"TeamRadio,omitempty"`
+	TeamRadio              *TeamRadioData              `json:"TeamRadio,omitempty"`
 	ChampionshipPrediction *ChampionshipPredictionData `json:"ChampionshipPrediction,omitempty"`
 
 	DriverList    map[string]DriverInfo       `json:"DriverList,omitempty"`
@@ -415,7 +419,7 @@ type raceDataForJSON struct {
 	SessionData            *SessionData                `json:"SessionData,omitempty"`
 	TimingData             *TimingData                 `json:"TimingData,omitempty"`
 	TyreStintSeries        *TyreStintSeries            `json:"TyreStintSeries,omitempty"`
-	TeamRadioCaptures      []TeamRadioCapture          `json:"TeamRadio,omitempty"`
+	TeamRadio              *TeamRadioData              `json:"TeamRadio,omitempty"`
 	ChampionshipPrediction *ChampionshipPredictionData `json:"ChampionshipPrediction,omitempty"`
 	LapCount               *LapCount                   `json:LapCount,omitempty`
 	LapHistoryMap          map[string]DriverLapHistory `json:LapHistoryMap`
@@ -450,7 +454,9 @@ func NewEmptyGlobalState() *GlobalState {
 				NoEntries: make([]int, 0),
 			},
 
-			TeamRadioCaptures: make([]TeamRadioCapture, 0),
+			TeamRadio: &TeamRadioData{
+				Captures: make([]TeamRadioCapture, 0),
+			},
 			ChampionshipPrediction: &ChampionshipPredictionData{
 				Drivers: make(map[string]DriverPrediction),
 				Teams:   make(map[string]TeamPrediction),
@@ -530,7 +536,7 @@ func NewGlobalState(initialJsonData []byte, broadcaster LapUpdateBroadcaster) (*
 		"CarData.z":              &newState.R.CarDataZ,
 		"Position.z":             &newState.R.PositionZ,
 		"TyreStintSeries":        &newState.R.TyreStintSeries,
-		"TeamRadio":              &newState.R.TeamRadioCaptures,
+		"TeamRadio":              newState.R.TeamRadio,
 		"ChampionshipPrediction": &newState.R.ChampionshipPrediction,
 		"LapCount":               newState.R.LapCount,
 	}
@@ -917,8 +923,10 @@ func (gs *GlobalState) updateTeamRadio(payloadBytes []byte) error {
 		return nil
 	}
 
-	if gs.R.TeamRadioCaptures == nil {
-		gs.R.TeamRadioCaptures = make([]TeamRadioCapture, 0)
+	if gs.R.TeamRadio == nil {
+		gs.R.TeamRadio = &TeamRadioData{
+			Captures: make([]TeamRadioCapture, 0),
+		}
 	}
 
 	if capturesResult.IsArray() {
@@ -927,7 +935,7 @@ func (gs *GlobalState) updateTeamRadio(payloadBytes []byte) error {
 			fmt.Printf("Warning: Failed to unmarshal TeamRadio Captures array: %v. Raw: %s\n", err, capturesResult.Raw)
 			return nil
 		}
-		gs.R.TeamRadioCaptures = append(gs.R.TeamRadioCaptures, newCaptures...)
+		gs.R.TeamRadio.Captures = append(gs.R.TeamRadio.Captures, newCaptures...)
 	} else if capturesResult.IsObject() {
 		var captureUpdates map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(capturesResult.Raw), &captureUpdates); err != nil {
@@ -940,7 +948,7 @@ func (gs *GlobalState) updateTeamRadio(payloadBytes []byte) error {
 				fmt.Printf("Warning: Failed to unmarshal individual TeamRadio capture: %v. Raw: %s\n", err, string(rawCapture))
 				continue
 			}
-			gs.R.TeamRadioCaptures = append(gs.R.TeamRadioCaptures, capture)
+			gs.R.TeamRadio.Captures = append(gs.R.TeamRadio.Captures, capture)
 		}
 	} else {
 		fmt.Printf("Warning: Unhandled data type for TeamRadio.Captures: %s\n", capturesResult.Type)
@@ -1187,7 +1195,7 @@ func (gs *GlobalState) GetStateAsJSON() ([]byte, error) {
 		SessionData:         gs.R.SessionData,
 		TimingData:          gs.R.TimingData,
 		TyreStintSeries:     gs.R.TyreStintSeries,
-		TeamRadioCaptures:   gs.R.TeamRadioCaptures,
+		TeamRadio:           gs.R.TeamRadio,
 		LapCount:            gs.R.LapCount,
 		LapHistoryMap:       gs.R.LapHistoryMap,
 	}
