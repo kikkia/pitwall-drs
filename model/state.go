@@ -645,6 +645,12 @@ func (gs *GlobalState) updateDriverList(payloadBytes []byte) error {
 			// fmt.Printf("Updated DriverList for driver %s: Line=%d\n", driverNumber, existingInfo.Line)
 		} else {
 			fmt.Printf("Warning: Received DriverList update for driver %s who is not in the current state. Update data: %s\n", driverNumber, string(rawUpdateData))
+			var newDriver DriverInfo
+			if err := json.Unmarshal(rawUpdateData, &newDriver); err != nil {
+				fmt.Printf("Warning: Failed to unmarshal new driver data for driver %s: %v. Data: %s\n", driverNumber, err, string(rawUpdateData))
+				continue
+			}
+			gs.R.DriverList[driverNumber] = newDriver
 		}
 	}
 	return nil
@@ -730,7 +736,7 @@ func (gs *GlobalState) updateTimingStats(payloadBytes []byte) error {
 			} else {
 				var bestSectorsMap map[string]json.RawMessage
 				if err := json.Unmarshal(bestSectorsBytes, &bestSectorsMap); err != nil {
-					fmt.Printf("Warning: Failed to unmarshal BestSectors map for driver %s: %v\n", driverNumber, err)
+					fmt.Printf("Warning: Failed to unmarshal BestSectors map for driver %s: %v - %s\n", driverNumber, err, bestSectorsBytes)
 				} else {
 					if err := applyMapUpdatesToSlice(&existingStats.BestSectors, bestSectorsMap); err != nil {
 						fmt.Printf("Warning: Error applying BestSectors updates for driver %s: %v\n", driverNumber, err)
