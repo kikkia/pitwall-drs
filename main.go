@@ -15,9 +15,13 @@ import (
 	"context"
 	"f1sockets/broadcaster"
 	"f1sockets/f1tvclient"
+	"f1sockets/filehandler"
 	"f1sockets/model"
+	"f1sockets/ratelimiter"
 	"f1sockets/season"
 	"f1sockets/valkeyclient"
+
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -176,37 +180,19 @@ func main() {
 		}
 	})
 
-	http.HandleFunc("/recordings", handleRecordings)
+	http.HandleFunc("/recordings", filehandler.HandleRecordings)
 
-	fileHandler := http.StripPrefix("/recordings/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(strings.ToLower(r.URL.Path), ".txt") {
-			http.NotFound(w, r)
+	limiter := ratelimiter.NewIPRateLimiter(rate.Every(time.Minute), 15) // 15 requests per minute
+	fileHandler := http.StripPrefix("/recordings/", filehandler.RecordingsFileHandler())
+
+	http.Handle("/recordings/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := ratelimiter.GetClientIP(r)
+		if !limiter.GetLimiter(ip).Allow() {
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return
 		}
-
-		cleanPath := filepath.Clean(r.URL.Path)
-		if strings.Contains(cleanPath, "..") {
-			http.NotFound(w, r)
-			return
-		}
-
-		safePath := filepath.Join("recordings", cleanPath)
-
-		absRecordings, _ := filepath.Abs("recordings")
-		absSafePath, _ := filepath.Abs(safePath)
-		if !strings.HasPrefix(absSafePath, absRecordings) {
-			http.NotFound(w, r)
-			return
-		}
-
-		if _, err := os.Stat(safePath); os.IsNotExist(err) {
-			http.NotFound(w, r)
-			return
-		}
-
-		http.ServeFile(w, r, safePath)
+		fileHandler.ServeHTTP(w, r)
 	}))
-	http.Handle("/recordings/", fileHandler)
 
 	if RECORD_LOGS {
 		go func() {
@@ -272,44 +258,6 @@ func getRecordingFilePath() string {
 	}
 
 	return fullPath
-}
-
-func handleRecordings(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	recordings := make(map[string][]string)
-	recordingsRoot := "recordings"
-
-	err := filepath.Walk(recordingsRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".txt") {
-			dir := filepath.Dir(path)
-			// Use ToSlash for consistent path separators in the JSON output
-			dir = filepath.ToSlash(dir)
-			recordings[dir] = append(recordings[dir], filepath.ToSlash(path))
-		}
-		return nil
-	})
-
-	if err != nil {
-		http.Error(w, "Failed to read recordings directory", http.StatusInternalServerError)
-		fmt.Printf("Error walking recordings directory: %v\n", err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*") // For local dev
-
-	if err := json.NewEncoder(w).Encode(recordings); err != nil {
-		http.Error(w, "Failed to encode recordings to JSON", http.StatusInternalServerError)
-		fmt.Printf("Error encoding recordings JSON: %v\n", err)
-	}
 }
 
 func handleState(w http.ResponseWriter, r *http.Request) {
