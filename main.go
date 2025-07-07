@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -153,8 +152,6 @@ func main() {
 
 	http.HandleFunc("/state", handleState)
 
-	// http.HandleFunc("/apply", handleApply)
-
 	http.HandleFunc("/season", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -178,6 +175,38 @@ func main() {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	})
+
+	http.HandleFunc("/recordings", handleRecordings)
+
+	fileHandler := http.StripPrefix("/recordings/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(strings.ToLower(r.URL.Path), ".txt") {
+			http.NotFound(w, r)
+			return
+		}
+
+		cleanPath := filepath.Clean(r.URL.Path)
+		if strings.Contains(cleanPath, "..") {
+			http.NotFound(w, r)
+			return
+		}
+
+		safePath := filepath.Join("recordings", cleanPath)
+
+		absRecordings, _ := filepath.Abs("recordings")
+		absSafePath, _ := filepath.Abs(safePath)
+		if !strings.HasPrefix(absSafePath, absRecordings) {
+			http.NotFound(w, r)
+			return
+		}
+
+		if _, err := os.Stat(safePath); os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+
+		http.ServeFile(w, r, safePath)
+	}))
+	http.Handle("/recordings/", fileHandler)
 
 	if RECORD_LOGS {
 		go func() {
@@ -245,6 +274,44 @@ func getRecordingFilePath() string {
 	return fullPath
 }
 
+func handleRecordings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	recordings := make(map[string][]string)
+	recordingsRoot := "recordings"
+
+	err := filepath.Walk(recordingsRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".txt") {
+			dir := filepath.Dir(path)
+			// Use ToSlash for consistent path separators in the JSON output
+			dir = filepath.ToSlash(dir)
+			recordings[dir] = append(recordings[dir], filepath.ToSlash(path))
+		}
+		return nil
+	})
+
+	if err != nil {
+		http.Error(w, "Failed to read recordings directory", http.StatusInternalServerError)
+		fmt.Printf("Error walking recordings directory: %v\n", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*") // For local dev
+
+	if err := json.NewEncoder(w).Encode(recordings); err != nil {
+		http.Error(w, "Failed to encode recordings to JSON", http.StatusInternalServerError)
+		fmt.Printf("Error encoding recordings JSON: %v\n", err)
+	}
+}
+
 func handleState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -268,57 +335,6 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Error encoding driver list JSON: %v\n", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
-}
-
-// Debug for sending a test message
-func handleApply(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	bodyBytes, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to read request body: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	var payload map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
-		http.Error(w, "Invalid JSON payload: "+err.Error(), http.StatusBadRequest)
-		fmt.Printf("Error decoding JSON: %v\nRaw body: %s\n", err, string(bodyBytes))
-		return
-	}
-
-	if mArray, ok := payload["M"].([]interface{}); ok {
-		for _, msgInterface := range mArray {
-			if msgMap, ok := msgInterface.(map[string]interface{}); ok {
-				// Check if it's a "feed" message
-				if hub, hubOk := msgMap["H"].(string); hubOk && hub == "Streaming" {
-					if method, methodOk := msgMap["M"].(string); methodOk && method == "feed" {
-						if args, argsOk := msgMap["A"].([]interface{}); argsOk {
-							// Ensure globalState is not nil before trying to update
-							if globalState != nil {
-								// Ensure the globalState has the broadcaster set for manual updates
-								if globalState.LapBroadcaster == nil {
-									globalState.LapBroadcaster = lapHistoryBroadcaster
-								}
-								err := globalState.ApplyFeedUpdate(args)
-								if err != nil {
-									fmt.Printf("Failed to apply feed update: %v\n Update Args: %v\n", err, args)
-								}
-							} else {
-								fmt.Println("Skipping feed update as global state is not yet initialized.")
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Feed update applied successfully"))
 }
 
 func joinWithNewlines(lines []string) string {
