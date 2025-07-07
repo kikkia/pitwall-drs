@@ -16,6 +16,7 @@ import (
 	"f1sockets/broadcaster"
 	"f1sockets/f1tvclient"
 	"f1sockets/filehandler"
+	"f1sockets/metrics"
 	"f1sockets/model"
 	"f1sockets/ratelimiter"
 	"f1sockets/season"
@@ -51,6 +52,8 @@ func init() {
 
 func main() {
 	flag.Parse()
+
+	metrics.Init()
 
 	fmt.Printf("Starting F1TV SignalR Proxy on %s\n", listenAddr)
 
@@ -154,9 +157,8 @@ func main() {
 		browserBroadcaster.HandleConnections(w, r, initialState)
 	})
 
-	http.HandleFunc("/state", handleState)
-
-	http.HandleFunc("/season", func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/state", metrics.InstrumentHandler(http.HandlerFunc(handleState)))
+	http.Handle("/season", metrics.InstrumentHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -178,21 +180,21 @@ func main() {
 			fmt.Printf("Error encoding season schedule JSON: %v\n", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
-	})
+	})))
 
-	http.HandleFunc("/recordings", filehandler.HandleRecordings)
+	http.Handle("/recordings", metrics.InstrumentHandler(http.HandlerFunc(filehandler.HandleRecordings)))
 
 	limiter := ratelimiter.NewIPRateLimiter(rate.Every(time.Minute), 15) // 15 requests per minute
 	fileHandler := http.StripPrefix("/recordings/", filehandler.RecordingsFileHandler())
 
-	http.Handle("/recordings/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/recordings/", metrics.InstrumentHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := ratelimiter.GetClientIP(r)
 		if !limiter.GetLimiter(ip).Allow() {
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return
 		}
 		fileHandler.ServeHTTP(w, r)
-	}))
+	})))
 
 	if RECORD_LOGS {
 		go func() {

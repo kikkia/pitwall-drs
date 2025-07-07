@@ -9,6 +9,9 @@ services:
       - socket-proxy-recordings:/app/recordings
     environment:
       - VALKEY_ADDR=${VALKEY_ADDR}
+      - DD_ENABLED=${DD_ENABLED:-false}
+      - DD_AGENT_HOST=host.docker.internal
+      - DD_DOGSTATSD_PORT=8125
     command: ["./socket-proxy", "--auto-connect=true"]
 
 volumes:

@@ -1,6 +1,7 @@
 package broadcaster
 
 import (
+	"f1sockets/metrics"
 	"fmt"
 	"net/http"
 	"sync"
@@ -48,6 +49,7 @@ func (b *Broadcaster) HandleConnections(w http.ResponseWriter, r *http.Request, 
 	b.Lock()
 	b.clients[conn] = true
 	b.Unlock()
+	metrics.IncConnections()
 
 	fmt.Printf("Browser client connected: %s. Total clients: %d\n", conn.RemoteAddr(), len(b.clients))
 
@@ -65,6 +67,7 @@ func (b *Broadcaster) HandleConnections(w http.ResponseWriter, r *http.Request, 
 	b.Lock()
 	delete(b.clients, conn)
 	b.Unlock()
+	metrics.DecConnections()
 	fmt.Printf("Browser client removed: %s. Total clients: %d\n", conn.RemoteAddr(), len(b.clients))
 }
 
