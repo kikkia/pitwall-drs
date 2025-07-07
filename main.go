@@ -60,7 +60,13 @@ func main() {
 	browserBroadcaster := broadcaster.NewBroadcaster()
 	lapHistoryBroadcaster = model.NewLapHistoryBroadcaster(browserBroadcaster.Broadcast)
 
-	seasonLoader := season.NewSeasonLoader(24 * time.Hour)
+	var valkey *valkeyclient.ValkeyClient
+	if valkeyAddr != "" {
+		fmt.Printf("Valkey integration enabled, connecting to %s\n", valkeyAddr)
+		valkey = valkeyclient.NewValkeyClient(valkeyAddr)
+	}
+
+	seasonLoader := season.NewSeasonLoader(24*time.Hour, valkey)
 	seasonLoader.Start()
 	defer seasonLoader.Stop()
 
@@ -127,11 +133,6 @@ func main() {
 
 	if autoConnect {
 		fmt.Println("Auto-connect mode enabled. F1TV client will connect/disconnect based on session times.")
-		var valkey *valkeyclient.ValkeyClient
-		if valkeyAddr != "" {
-			fmt.Printf("Valkey integration enabled, connecting to %s\n", valkeyAddr)
-			valkey = valkeyclient.NewValkeyClient(valkeyAddr)
-		}
 
 		checkAndManageConnection(f1tvClient, seasonLoader, valkey)
 

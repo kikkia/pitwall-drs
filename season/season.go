@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"context"
 	"f1sockets/model"
+	"f1sockets/valkeyclient"
 
 	ics "github.com/arran4/golang-ical"
 )
@@ -21,13 +23,15 @@ type SeasonLoader struct {
 	wg           sync.WaitGroup
 	initialLoad  sync.Once
 	readyChan    chan struct{}
+	valkey       *valkeyclient.ValkeyClient
 }
 
-func NewSeasonLoader(interval time.Duration) *SeasonLoader {
+func NewSeasonLoader(interval time.Duration, valkey *valkeyclient.ValkeyClient) *SeasonLoader {
 	return &SeasonLoader{
 		loadInterval: interval,
 		stopChan:     make(chan struct{}),
 		readyChan:    make(chan struct{}),
+		valkey:       valkey,
 	}
 }
 
@@ -62,7 +66,19 @@ func (s *SeasonLoader) run() {
 
 func (s *SeasonLoader) loadData() {
 	defer s.initialLoad.Do(func() { close(s.readyChan) })
-	fmt.Println("Fetching F1 season data...")
+
+	if s.valkey != nil {
+		cachedSchedule, err := s.valkey.LoadSeasonSchedule(context.Background())
+		if err != nil {
+			fmt.Printf("Error loading season schedule from Valkey: %v\n", err)
+		} else if cachedSchedule != nil {
+			s.schedule = *cachedSchedule
+			fmt.Printf("Successfully loaded %d F1 events from cache.\n", len(s.schedule.Events))
+			return
+		}
+	}
+
+	fmt.Println("Fetching F1 season data from source...")
 	resp, err := http.Get(seasonCalendarURL)
 	if err != nil {
 		fmt.Printf("Error fetching season data: %v\n", err)
@@ -119,6 +135,15 @@ func (s *SeasonLoader) loadData() {
 
 	s.schedule = newSchedule
 	fmt.Printf("Successfully loaded %d F1 events.\n", len(s.schedule.Events))
+
+	if s.valkey != nil {
+		err := s.valkey.SaveSeasonSchedule(context.Background(), &s.schedule)
+		if err != nil {
+			fmt.Printf("Error saving season schedule to Valkey: %v\n", err)
+		} else {
+			fmt.Println("Season schedule saved to Valkey.")
+		}
+	}
 }
 
 func (s *SeasonLoader) GetSeasonSchedule() model.SeasonSchedule {

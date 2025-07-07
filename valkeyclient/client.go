@@ -66,3 +66,33 @@ func (vc *ValkeyClient) LoadLatestState(ctx context.Context) (*model.GlobalState
 
 	return &state, nil
 }
+
+func (vc *ValkeyClient) SaveSeasonSchedule(ctx context.Context, schedule *model.SeasonSchedule) error {
+	scheduleJSON, err := json.Marshal(schedule)
+	if err != nil {
+		return fmt.Errorf("failed to marshal season schedule: %w", err)
+	}
+
+	err = vc.client.Set(ctx, "f1_season_schedule", scheduleJSON, 24*time.Hour).Err()
+	if err != nil {
+		return fmt.Errorf("failed to save season schedule to Valkey: %w", err)
+	}
+	return nil
+}
+
+func (vc *ValkeyClient) LoadSeasonSchedule(ctx context.Context) (*model.SeasonSchedule, error) {
+	scheduleJSON, err := vc.client.Get(ctx, "f1_season_schedule").Result()
+	if err == redis.Nil {
+		return nil, nil // Cache miss
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get season schedule from Valkey: %w", err)
+	}
+
+	var schedule model.SeasonSchedule
+	if err := json.Unmarshal([]byte(scheduleJSON), &schedule); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal season schedule: %w", err)
+	}
+
+	return &schedule, nil
+}
