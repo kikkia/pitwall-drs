@@ -2,6 +2,7 @@ package broadcaster
 
 import (
 	"f1sockets/metrics"
+	"f1sockets/ratelimiter"
 	"fmt"
 	"net/http"
 	"sync"
@@ -11,14 +12,16 @@ import (
 
 // Manages connected browser WebSocket clients and broadcasts messages.
 type Broadcaster struct {
-	clients map[*websocket.Conn]bool
+	clients           map[*websocket.Conn]bool
+	connectionLimiter *ratelimiter.ConnectionLimiter
 	sync.RWMutex
 	upgrader websocket.Upgrader
 }
 
-func NewBroadcaster() *Broadcaster {
+func NewBroadcaster(connectionLimiter *ratelimiter.ConnectionLimiter) *Broadcaster {
 	return &Broadcaster{
-		clients: make(map[*websocket.Conn]bool),
+		clients:           make(map[*websocket.Conn]bool),
+		connectionLimiter: connectionLimiter,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				// atm allow from all origins
@@ -29,8 +32,14 @@ func NewBroadcaster() *Broadcaster {
 }
 
 // Handles the initial websocket request and then the connection
-// TODO: add some ratelimiting function on a per ip basis.
 func (b *Broadcaster) HandleConnections(w http.ResponseWriter, r *http.Request, initialMessage []byte) {
+	ip := ratelimiter.GetClientIP(r)
+	if !b.connectionLimiter.AddConnection(ip) {
+		http.Error(w, "Too many connections from your IP", http.StatusTooManyRequests)
+		return
+	}
+	defer b.connectionLimiter.RemoveConnection(ip)
+
 	conn, err := b.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		fmt.Printf("Failed to upgrade HTTP to WebSocket: %v\n", err)

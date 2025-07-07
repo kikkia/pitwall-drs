@@ -57,7 +57,8 @@ func main() {
 
 	fmt.Printf("Starting F1TV SignalR Proxy on %s\n", listenAddr)
 
-	browserBroadcaster := broadcaster.NewBroadcaster()
+	connectionLimiter := ratelimiter.NewConnectionLimiter(100)
+	browserBroadcaster := broadcaster.NewBroadcaster(connectionLimiter)
 	lapHistoryBroadcaster = model.NewLapHistoryBroadcaster(browserBroadcaster.Broadcast)
 
 	var valkey *valkeyclient.ValkeyClient

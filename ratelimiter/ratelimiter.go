@@ -43,3 +43,43 @@ func GetClientIP(r *http.Request) string {
 	}
 	return ip
 }
+
+// Less of a rate limiter and more of a total connection per IP tracker
+type ConnectionLimiter struct {
+	ips   map[string]int
+	mu    *sync.RWMutex
+	limit int
+}
+
+func NewConnectionLimiter(limit int) *ConnectionLimiter {
+	return &ConnectionLimiter{
+		ips:   make(map[string]int),
+		mu:    &sync.RWMutex{},
+		limit: limit,
+	}
+}
+
+func (c *ConnectionLimiter) AddConnection(ip string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	count, _ := c.ips[ip]
+	if count >= c.limit {
+		return false
+	}
+	c.ips[ip] = count + 1
+	return true
+}
+
+func (c *ConnectionLimiter) RemoveConnection(ip string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if count, exists := c.ips[ip]; exists {
+		if count > 1 {
+			c.ips[ip] = count - 1
+		} else {
+			delete(c.ips, ip)
+		}
+	}
+}
