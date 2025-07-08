@@ -10,12 +10,19 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /socket-proxy main.go
 
-# Stage 2: Create the final image
 FROM alpine:latest
 
-WORKDIR /root/
+RUN addgroup -g 1000 appgroup && adduser -u 1000 -G appgroup -s /bin/sh -D appuser
 
-COPY --from=builder /socket-proxy .
+WORKDIR /app
+
+COPY --from=builder /socket-proxy /app/socket-proxy
+
+RUN chmod +x /app/socket-proxy && chown appuser:appgroup /app/socket-proxy
+
+RUN mkdir -p /app/recordings && chown appuser:appgroup /app/recordings
+
+USER appuser
 
 EXPOSE 8080
 
