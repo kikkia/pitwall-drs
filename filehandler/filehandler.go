@@ -107,6 +107,8 @@ func RecordingsFileHandler() http.Handler {
 			return
 		}
 
+		w.Header().Set("Access-Control-Allow-Origin", "*") // for local dev
+
 		ServeFileWithCompression(w, r, safePath)
 	})
 }
@@ -116,6 +118,9 @@ func HandleRecordings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*") // for local dev
 
 	recordings := make(map[string][]string)
 	recordingsRoot := "recordings"
@@ -139,9 +144,6 @@ func HandleRecordings(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Error walking recordings directory: %v\n", err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	if err := json.NewEncoder(w).Encode(recordings); err != nil {
 		http.Error(w, "Failed to encode recordings to JSON", http.StatusInternalServerError)
