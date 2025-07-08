@@ -3,6 +3,7 @@ package broadcaster
 import (
 	"f1sockets/metrics"
 	"f1sockets/ratelimiter"
+	"f1sockets/recorder"
 	"fmt"
 	"net/http"
 	"sync"
@@ -14,14 +15,16 @@ import (
 type Broadcaster struct {
 	clients           map[*websocket.Conn]bool
 	connectionLimiter *ratelimiter.ConnectionLimiter
+	recorder          *recorder.Recorder
 	sync.RWMutex
 	upgrader websocket.Upgrader
 }
 
-func NewBroadcaster(connectionLimiter *ratelimiter.ConnectionLimiter) *Broadcaster {
+func NewBroadcaster(connectionLimiter *ratelimiter.ConnectionLimiter, recorder *recorder.Recorder) *Broadcaster {
 	return &Broadcaster{
 		clients:           make(map[*websocket.Conn]bool),
 		connectionLimiter: connectionLimiter,
+		recorder:          recorder,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				// atm allow from all origins
@@ -82,6 +85,9 @@ func (b *Broadcaster) HandleConnections(w http.ResponseWriter, r *http.Request, 
 
 // Broadcast a given message to all connected clients
 func (b *Broadcaster) Broadcast(message []byte) {
+	// Record any message that is broadcasted
+	b.recorder.Record(message)
+
 	b.RLock()
 	defer b.RUnlock()
 

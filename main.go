@@ -6,11 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
-	"sync"
 	"time"
-
-	"path/filepath"
 
 	"context"
 	"f1sockets/broadcaster"
@@ -19,6 +15,7 @@ import (
 	"f1sockets/metrics"
 	"f1sockets/model"
 	"f1sockets/ratelimiter"
+	"f1sockets/recorder"
 	"f1sockets/season"
 	"f1sockets/valkeyclient"
 
@@ -35,9 +32,6 @@ var (
 )
 
 var (
-	logBuffer          = make([]string, 0, 1000)
-	logBufferMutex     sync.Mutex
-	logFlushTicker     = time.NewTicker(2 * time.Second)
 	RECORD_LOGS        = true
 	autoConnect        = false
 	valkeyAddr         string
@@ -58,7 +52,15 @@ func main() {
 	fmt.Printf("Starting F1TV SignalR Proxy on %s\n", listenAddr)
 
 	connectionLimiter := ratelimiter.NewConnectionLimiter(100)
-	browserBroadcaster := broadcaster.NewBroadcaster(connectionLimiter)
+
+	// Recorder setup
+	sessionRecorder := recorder.NewRecorder(2*time.Second, func() *model.GlobalState {
+		return globalState
+	}, RECORD_LOGS)
+	sessionRecorder.Start()
+	defer sessionRecorder.Stop()
+
+	browserBroadcaster := broadcaster.NewBroadcaster(connectionLimiter, sessionRecorder)
 	lapHistoryBroadcaster = model.NewLapHistoryBroadcaster(browserBroadcaster.Broadcast)
 
 	var valkey *valkeyclient.ValkeyClient
@@ -76,12 +78,7 @@ func main() {
 	fmt.Println("Season data loaded.")
 
 	f1tvClient = f1tvclient.NewF1TVClient(func(message []byte) {
-		if RECORD_LOGS && (globalState == nil || !globalState.IsSessionFinished()) {
-			logEntry := fmt.Sprintf("[%s] %s\n", time.Now().Format(time.RFC3339), message)
-			logBufferMutex.Lock()
-			logBuffer = append(logBuffer, logEntry)
-			logBufferMutex.Unlock()
-		}
+		sessionRecorder.Record(message)
 
 		var signalRMessage map[string]interface{}
 		if err := json.Unmarshal(message, &signalRMessage); err == nil {
@@ -198,70 +195,10 @@ func main() {
 		fileHandler.ServeHTTP(w, r)
 	})))
 
-	if RECORD_LOGS {
-		go func() {
-			for range logFlushTicker.C {
-				if !f1tvClient.IsRunning() {
-					//fmt.Println("Client not connected, not logging")
-					continue
-				}
-
-				if getRecordingFilePath() == "" {
-					fmt.Println("Filepath not yet present, skipping this logging dump")
-					continue
-				}
-
-				logBufferMutex.Lock()
-				if len(logBuffer) > 0 {
-					toWrite := logBuffer
-					logBuffer = make([]string, 0, 1000)
-					logBufferMutex.Unlock()
-
-					filePath := getRecordingFilePath()
-					if filePath == "" {
-						fmt.Println("Filepath not yet present, skipping this logging dump")
-						continue
-					}
-
-					f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-					if err != nil {
-						fmt.Printf("Failed to open log file for appending: %v\n", err)
-						continue
-					}
-
-					if _, err := f.WriteString(joinWithNewlines(toWrite)); err != nil {
-						fmt.Printf("Failed to write log batch: %v\n", err)
-					}
-					f.Close()
-				} else {
-					logBufferMutex.Unlock()
-				}
-			}
-		}()
-	}
-
 	err := http.ListenAndServe(listenAddr, nil)
 	if err != nil {
 		fmt.Printf("HTTP server failed: %v\n", err)
 	}
-}
-
-func getRecordingFilePath() string {
-	if globalState == nil || globalState.R.SessionInfo == nil {
-		fmt.Println("Warning: globalState or SessionInfo is nil, cannot determine recording file path.")
-		return ""
-	}
-
-	formattedPath := formatSessionPath(globalState.R.SessionInfo.Path)
-	fullPath := "recordings/" + formattedPath + ".txt"
-
-	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		fmt.Printf("Error creating directory %s: %v\n", dir, err)
-		return ""
-	}
-
-	return fullPath
 }
 
 func handleState(w http.ResponseWriter, r *http.Request) {
@@ -289,9 +226,6 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func joinWithNewlines(lines []string) string {
-	return fmt.Sprint(strings.Join(lines, "\n"))
-}
 func resetGlobalState() {
 	if globalState != nil {
 		fmt.Println("Resetting global state for new connection.")
@@ -370,30 +304,4 @@ func manageF1TVConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLo
 	for range ticker.C {
 		checkAndManageConnection(client, loader, valkey)
 	}
-}
-
-// formatSessionPath takes a session path like "2025/2025-06-15_Canadian_Grand_Prix/2025-06-13_Practice_1/"
-// and transforms it to "2025/Canadian_Grand_Prix/Practice_1"
-func formatSessionPath(sessionPath string) string {
-	parts := strings.Split(sessionPath, "/")
-	if len(parts) == 0 {
-		return ""
-	}
-
-	cleanedParts := []string{parts[0]}
-
-	for i := 1; i < len(parts); i++ {
-		part := parts[i]
-		if part == "" {
-			continue // Skip empty parts, especially if path ends with "/"
-		}
-		// Check if the part starts with a date pattern ("YYYY-MM-DD_")
-		if len(part) >= 11 && part[4] == '-' && part[7] == '-' && part[10] == '_' {
-			cleanedParts = append(cleanedParts, part[11:])
-		} else {
-			cleanedParts = append(cleanedParts, part)
-		}
-	}
-
-	return strings.Join(cleanedParts, "/")
 }
