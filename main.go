@@ -17,6 +17,7 @@ import (
 	"f1sockets/ratelimiter"
 	"f1sockets/recorder"
 	"f1sockets/season"
+	"f1sockets/track"
 	"f1sockets/valkeyclient"
 
 	"golang.org/x/time/rate"
@@ -193,6 +194,15 @@ func main() {
 			return
 		}
 		fileHandler.ServeHTTP(w, r)
+	})))
+
+	http.Handle("/track/", metrics.InstrumentHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := ratelimiter.GetClientIP(r)
+		if !limiter.GetLimiter(ip).Allow() {
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+		track.HandleTrack(w, r)
 	})))
 
 	err := http.ListenAndServe(listenAddr, nil)

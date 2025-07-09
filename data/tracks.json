@@ -1,0 +1,194 @@
+[
+    {
+        "lon": -97.633,
+        "lat": 30.135,
+        "location": "Austin",
+        "name": "Circuit of the Americas",
+        "id": "us-2012",
+        "pitDelta": 20.3
+    },
+    {
+        "lon": 49.842,
+        "lat": 40.369,
+        "location": "Baku",
+        "name": "Baku City Circuit",
+        "id": "az-2016",
+        "pitDelta": 19.8
+    },
+    {
+        "lon": 2.259,
+        "lat": 41.569,
+        "location": "Barcelona",
+        "name": "Circuit de Barcelona-Catalunya",
+        "id": "es-1991",
+        "pitDelta": 22.2
+    },
+    {
+        "lon": 19.250,
+        "lat": 47.583,
+        "location": "Budapest",
+        "name": "Hungaroring",
+        "id": "hu-1986",
+        "pitDelta": 20.56
+    },
+    {
+        "lon": 11.713,
+        "lat": 44.341,
+        "location": "Imola",
+        "name": "Autodromo Enzo e Dino Ferrari",
+        "id": "it-1953",
+        "pitDelta": 28.2
+    },
+    {
+        "lon": 39.104,
+        "lat": 21.632,
+        "location": "Jeddah",
+        "name": "Jeddah Corniche Circuit",
+        "id": "sa-2021",
+        "pitDelta": 19.2
+    },
+    {
+        "lon": -115.168,
+        "lat": 36.116,
+        "location": "Las Vegas",
+        "name": "Las Vegas Street Circuit",
+        "id": "us-2023",
+        "pitDelta": 20.5
+    },
+    {
+        "lon": -3.620,
+        "lat": 40.471,
+        "location": "Madrid",
+        "name": "Circuito de Madring",
+        "id": "es-2026",
+        "pitDelta": 22.3
+    },
+    {
+        "lon": 144.970,
+        "lat": -37.846,
+        "location": "Melbourne",
+        "name": "Albert Park Circuit",
+        "id": "au-1953",
+        "pitDelta": 19.3
+    },
+    {
+        "lon": -99.091,
+        "lat": 19.402,
+        "location": "Mexico City",
+        "name": "Autódromo Hermanos Rodríguez",
+        "id": "mx-1962",
+        "pitDelta": 21.86
+    },
+    {
+        "lon": -80.239,
+        "lat": 25.958,
+        "location": "Miami",
+        "name": "Miami International Autodrome",
+        "id": "us-2022",
+        "pitDelta": 19.9
+    },
+    {
+        "lon": 7.429,
+        "lat": 43.737,
+        "location": "Monaco",
+        "name": "Circuit de Monaco",
+        "id": "mc-1929",
+        "pitDelta": 19.4
+    },
+    {
+        "lon": -73.525,
+        "lat": 45.506,
+        "location": "Montreal",
+        "name": "Circuit Gilles-Villeneuve",
+        "id": "ca-1978",
+        "pitDelta": 18.4
+    },
+    {
+        "lon": 9.290,
+        "lat": 45.621,
+        "location": "Monza",
+        "name": "Autodromo Nazionale Monza",
+        "id": "it-1922",
+        "pitDelta": 23.71
+    },
+    {
+        "lon": 50.512,
+        "lat": 26.031,
+        "location": "Sakhir",
+        "name": "Bahrain International Circuit",
+        "id": "bh-2002",
+        "pitDelta": 22.9
+    },
+    {
+        "lon": -46.698,
+        "lat": -23.702,
+        "location": "Sao Paulo",
+        "name": "Autódromo José Carlos Pace - Interlagos",
+        "id": "br-1940",
+        "pitDelta": 20.83
+    },
+    {
+        "lon": 121.221,
+        "lat": 31.340,
+        "location": "Shanghai",
+        "name": "Shanghai International Circuit",
+        "id": "cn-2004",
+        "pitDelta": 21.9
+    },
+    {
+        "lon": -1.017,
+        "lat": 52.072,
+        "location": "Silverstone",
+        "name": "Silverstone Circuit",
+        "id": "gb-1948",
+        "pitDelta": 19.9
+    },
+    {
+        "lon": 103.859,
+        "lat": 1.291,
+        "location": "Singapore",
+        "name": "Marina Bay Street Circuit",
+        "id": "sg-2008",
+        "pitDelta": 29.02
+    },
+    {
+        "lon": 5.971,
+        "lat": 50.436,
+        "location": "Spa Francorchamps",
+        "name": "Circuit de Spa-Francorchamps",
+        "id": "be-1925",
+        "pitDelta": 18.9
+    },
+    {
+        "lon": 14.761,
+        "lat": 47.223,
+        "location": "Spielberg",
+        "name": "Red Bull Ring",
+        "id": "at-1969",
+        "pitDelta": 20.4
+    },
+    {
+        "lon": 136.534,
+        "lat": 34.844,
+        "location": "Suzuka",
+        "name": "Suzuka International Racing Course",
+        "id": "jp-1962",
+        "pitDelta": 22.7
+    },
+    {
+        "lon": 54.601,
+        "lat": 24.471,
+        "location": "Yas Marina",
+        "name": "Yas Marina Circuit",
+        "id": "ae-2009",
+        "pitDelta": 21.93
+    },
+    {
+        "lon": 4.541,
+        "lat": 52.389,
+        "location": "Zandvoort",
+        "name": "Circuit Zandvoort",
+        "id": "nl-1948",
+        "pitDelta": 21.52
+    }
+]
