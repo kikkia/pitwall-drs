@@ -39,7 +39,7 @@ func loadTracks() {
 	})
 }
 
-// HandleTrack handles requests for a single track's data by its ID.
+// HandleTrack handles requests for a single track's data by its ID, name, or location.
 func HandleTrack(w http.ResponseWriter, r *http.Request) {
 	loadTracks()
 
@@ -53,7 +53,7 @@ func HandleTrack(w http.ResponseWriter, r *http.Request) {
 
 	id := strings.TrimPrefix(r.URL.Path, "/track/")
 	for _, track := range tracks {
-		if track.ID == id {
+		if strings.EqualFold(track.ID, id) || strings.EqualFold(track.Name, id) || strings.EqualFold(track.Location, id) {
 			if err := json.NewEncoder(w).Encode(track); err != nil {
 				fmt.Printf("Error encoding track data for id %s: %v\n", id, err)
 			}
