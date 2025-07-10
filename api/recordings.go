@@ -1,4 +1,4 @@
-package filehandler
+package api
 
 import (
 	"compress/gzip"

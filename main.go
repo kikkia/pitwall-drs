@@ -9,15 +9,13 @@ import (
 	"time"
 
 	"context"
+	"f1sockets/api"
 	"f1sockets/broadcaster"
 	"f1sockets/f1tvclient"
-	"f1sockets/filehandler"
 	"f1sockets/metrics"
 	"f1sockets/model"
 	"f1sockets/ratelimiter"
 	"f1sockets/recorder"
-	"f1sockets/season"
-	"f1sockets/track"
 	"f1sockets/valkeyclient"
 
 	"golang.org/x/time/rate"
@@ -70,7 +68,7 @@ func main() {
 		valkey = valkeyclient.NewValkeyClient(valkeyAddr)
 	}
 
-	seasonLoader := season.NewSeasonLoader(24*time.Hour, valkey)
+	seasonLoader := api.NewSeasonLoader(24*time.Hour, valkey)
 	seasonLoader.Start()
 	defer seasonLoader.Stop()
 
@@ -182,10 +180,10 @@ func main() {
 		}
 	})))
 
-	http.Handle("/recordings", metrics.InstrumentHandler(http.HandlerFunc(filehandler.HandleRecordings)))
+	http.Handle("/recordings", metrics.InstrumentHandler(http.HandlerFunc(api.HandleRecordings)))
 
 	limiter := ratelimiter.NewIPRateLimiter(rate.Every(time.Minute), 15) // 15 requests per minute
-	fileHandler := http.StripPrefix("/recordings/", filehandler.RecordingsFileHandler())
+	fileHandler := http.StripPrefix("/recordings/", api.RecordingsFileHandler())
 
 	http.Handle("/recordings/", metrics.InstrumentHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := ratelimiter.GetClientIP(r)
@@ -202,7 +200,7 @@ func main() {
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return
 		}
-		track.HandleTrack(w, r)
+		api.HandleTrack(w, r)
 	})))
 
 	err := http.ListenAndServe(listenAddr, nil)
@@ -258,7 +256,7 @@ func findActiveEvent(schedule *model.SeasonSchedule, now time.Time, buffer time.
 }
 
 // checkAndManageConnection contains the core logic for deciding whether to connect or disconnect.
-func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLoader, valkey *valkeyclient.ValkeyClient) {
+func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *api.SeasonLoader, valkey *valkeyclient.ValkeyClient) {
 	const bufferDuration = 14 * time.Minute
 	now := time.Now()
 	schedule := loader.GetSeasonSchedule()
@@ -302,7 +300,7 @@ func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *season.Seas
 	}
 }
 
-func manageF1TVConnection(client *f1tvclient.F1TVClient, loader *season.SeasonLoader, valkey *valkeyclient.ValkeyClient) {
+func manageF1TVConnection(client *f1tvclient.F1TVClient, loader *api.SeasonLoader, valkey *valkeyclient.ValkeyClient) {
 	const checkInterval = 1 * time.Minute
 
 	// Run once immediately on start to avoid initial delay

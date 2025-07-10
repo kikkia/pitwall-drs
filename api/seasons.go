@@ -1,4 +1,4 @@
-package season
+package api
 
 import (
 	"fmt"
