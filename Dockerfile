@@ -21,6 +21,8 @@ RUN chmod +x /app/socket-proxy && chown appuser:appgroup /app/socket-proxy
 
 RUN mkdir -p /app/recordings && chown appuser:appgroup /app/recordings
 
+COPY --chown=appuser:appgroup data/ /app/data/
+
 USER appuser
 
 EXPOSE 8080
