@@ -366,6 +366,7 @@ type CompletedLap struct {
 	Sectors      []SectorTiming `json:"Sectors"` // Current/last lap sector info (Index 0=S1, 1=S2, 2=S3)
 	Pitted       bool           `json:Pitted`    // If the car was in the pits at any time that lap
 	TyreCompound string         `json:Compound`  // The tyre compound used on that lap
+	Position     string         `json:Position`  // Drivers postion at the end of the lap
 }
 
 type DriverLapHistory struct {
@@ -1346,6 +1347,7 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 		Sectors:      currentSectors,
 		Pitted:       hasPitted,
 		TyreCompound: compound,
+		Position:     driverTiming.Position,
 	}
 
 	foundIndex := -1
