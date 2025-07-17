@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -21,7 +22,7 @@ type Broadcaster struct {
 }
 
 func NewBroadcaster(connectionLimiter *ratelimiter.ConnectionLimiter, recorder *recorder.Recorder) *Broadcaster {
-	return &Broadcaster{
+	b := &Broadcaster{
 		clients:           make(map[*websocket.Conn]bool),
 		connectionLimiter: connectionLimiter,
 		recorder:          recorder,
@@ -32,6 +33,10 @@ func NewBroadcaster(connectionLimiter *ratelimiter.ConnectionLimiter, recorder *
 			},
 		},
 	}
+
+	go b.startMetricsEmitter()
+
+	return b
 }
 
 // Handles the initial websocket request and then the connection
@@ -61,7 +66,7 @@ func (b *Broadcaster) HandleConnections(w http.ResponseWriter, r *http.Request, 
 	b.Lock()
 	b.clients[conn] = true
 	b.Unlock()
-	metrics.IncConnections()
+	metrics.OpenConnection()
 
 	fmt.Printf("Browser client connected: %s. Total clients: %d\n", conn.RemoteAddr(), len(b.clients))
 
@@ -79,7 +84,7 @@ func (b *Broadcaster) HandleConnections(w http.ResponseWriter, r *http.Request, 
 	b.Lock()
 	delete(b.clients, conn)
 	b.Unlock()
-	metrics.DecConnections()
+	metrics.CloseConnection()
 	fmt.Printf("Browser client removed: %s. Total clients: %d\n", conn.RemoteAddr(), len(b.clients))
 }
 
@@ -105,4 +110,14 @@ func (b *Broadcaster) GetClientCount() int {
 	b.RLock()
 	defer b.RUnlock()
 	return len(b.clients)
+}
+
+// Emits the total number of connected clients to metrics every minute
+func (b *Broadcaster) startMetricsEmitter() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		metrics.TotalConnections(b.GetClientCount())
+	}
 }

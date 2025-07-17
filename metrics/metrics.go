@@ -43,18 +43,25 @@ func Init() {
 	fmt.Println("Datadog client initialized")
 }
 
-func IncConnections() {
+func OpenConnection() {
 	if Client == nil {
 		return
 	}
-	Client.Incr("f1_socket_proxy.websockets.active_connections", nil, 1)
+	Client.Incr("f1_socket_proxy.websockets.connection_open", nil, 1)
 }
 
-func DecConnections() {
+func CloseConnection() {
 	if Client == nil {
 		return
 	}
-	Client.Decr("f1_socket_proxy.websockets.active_connections", nil, 1)
+	Client.Incr("f1_socket_proxy.websockets.connection_close", nil, 1)
+}
+
+func TotalConnections(connectionCount int) {
+	if Client == nil {
+		return
+	}
+	Client.Gauge("f1_socket_proxy.websockets.total_connections", float64(connectionCount), nil, 0)
 }
 
 // Middleware to track API requests.
