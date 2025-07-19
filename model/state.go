@@ -513,6 +513,25 @@ func NewGlobalState(initialJsonData []byte, broadcaster LapUpdateBroadcaster) (*
 				return nil
 			}
 
+			// Custom handling for TeamRadio which can be an array on init
+			if key == "TeamRadio" {
+				var tempRadio struct {
+					Captures []TeamRadioCapture `json:"Captures"`
+				}
+				if err := json.Unmarshal(raw, &tempRadio); err == nil {
+					if newState.R.TeamRadio == nil {
+						newState.R.TeamRadio = &TeamRadioData{Captures: make(map[string]TeamRadioCapture)}
+					}
+					for i, capture := range tempRadio.Captures {
+						// Use index as key since there's no other clear unique key in the array form
+						key := fmt.Sprintf("%d", i)
+						newState.R.TeamRadio.Captures[key] = capture
+					}
+					return nil
+				}
+				// If it's not an array of captures, fall through to default map handling
+			}
+
 			err := json.Unmarshal(raw, target)
 			if err != nil {
 				return fmt.Errorf("NewGlobalState failed: could not unmarshal R.%s: %w", key, err)
