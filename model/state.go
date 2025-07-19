@@ -12,49 +12,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// LapUpdateBroadcaster defines an interface for broadcasting lap updates.
-type LapUpdateBroadcaster interface {
-	BroadcastLapHistory(driverNum string, completedLap CompletedLap)
-}
-
-// LapHistoryBroadcasterImpl is a concrete implementation of LapUpdateBroadcaster.
-type LapHistoryBroadcasterImpl struct {
-	broadcastFunc func([]byte)
-}
-
-// NewLapHistoryBroadcaster creates a new LapHistoryBroadcasterImpl with the given broadcast function.
-func NewLapHistoryBroadcaster(f func([]byte)) *LapHistoryBroadcasterImpl {
-	return &LapHistoryBroadcasterImpl{broadcastFunc: f}
-}
-
-// BroadcastLapHistory broadcasts the given lap history.
-func (b *LapHistoryBroadcasterImpl) BroadcastLapHistory(driverNum string, completedLap CompletedLap) {
-	// Create a specific message structure for lap history updates
-	// This mimics the SignalR message format for a new "LapHistory" field
-	message := map[string]interface{}{
-		"M": []map[string]interface{}{
-			{
-				"H": "Streaming",
-				"M": "feed",
-				"A": []interface{}{
-					"LapHistory",
-					map[string]interface{}{
-						"RacingNumber": driverNum,
-						"CompletedLap": completedLap, // Send only the new completed lap
-					},
-				},
-			},
-		},
-	}
-
-	jsonMessage, err := json.Marshal(message)
-	if err != nil {
-		fmt.Printf("Error marshalling lap history message: %v\n", err)
-		return
-	}
-	b.broadcastFunc(jsonMessage)
-}
-
 type Heartbeat struct {
 	UTC string `json:"Utc"`
 }
@@ -81,17 +38,18 @@ type TrackStatus struct {
 }
 
 type DriverInfo struct {
-	RacingNumber  string `json:"RacingNumber"`
-	BroadcastName string `json:"BroadcastName"`
-	FullName      string `json:"FullName"`
-	Tla           string `json:"Tla"`  // Three Letter Acronym
-	Line          int    `json:"Line"` // Appears to be an ordering or grid line number
-	TeamName      string `json:"TeamName"`
-	TeamColour    string `json:"TeamColour"` // Hex color code without #
-	FirstName     string `json:"FirstName"`
-	LastName      string `json:"LastName"`
-	Reference     string `json:"Reference"` // Unique identifier
-	HeadshotUrl   string `json:"HeadshotUrl"`
+	RacingNumber     string `json:"RacingNumber"`
+	BroadcastName    string `json:"BroadcastName"`
+	FullName         string `json:"FullName"`
+	Tla              string `json:"Tla"`  // Three Letter Acronym
+	Line             int    `json:"Line"` // Appears to be an ordering or grid line number
+	TeamName         string `json:"TeamName"`
+	TeamColour       string `json:"TeamColour"` // Hex color code without #
+	FirstName        string `json:"FirstName"`
+	LastName         string `json:"LastName"`
+	Reference        string `json:"Reference"` // Unique identifier
+	HeadshotUrl      string `json:"HeadshotUrl"`
+	StartingPosition string `json:"StartingPosition,omitempty"`
 }
 
 type TopThreeData struct {
@@ -398,9 +356,9 @@ type RaceData struct {
 }
 
 type GlobalState struct {
-	R              RaceData `json:"R"`
-	mu             sync.RWMutex
-	LapBroadcaster LapUpdateBroadcaster `json:"-"`
+	R           RaceData `json:"R"`
+	mu          sync.RWMutex
+	Broadcaster CustomEventBroadcaster `json:"-"`
 }
 
 // Intermediate struct specifically for marshalling to match F1's R object format
@@ -466,13 +424,13 @@ func NewEmptyGlobalState() *GlobalState {
 			LapCount:      &LapCount{},
 			LapHistoryMap: make(map[string]DriverLapHistory),
 		},
-		LapBroadcaster: nil, // Will be set by NewGlobalState or main
+		Broadcaster: nil, // Will be set by NewGlobalState or main
 	}
 }
 
-func NewGlobalState(initialJsonData []byte, broadcaster LapUpdateBroadcaster) (*GlobalState, error) {
+func NewGlobalState(initialJsonData []byte, broadcaster CustomEventBroadcaster) (*GlobalState, error) {
 	newState := NewEmptyGlobalState()
-	newState.LapBroadcaster = broadcaster
+	newState.Broadcaster = broadcaster
 
 	var topLevel map[string]json.RawMessage
 	if err := json.Unmarshal(initialJsonData, &topLevel); err != nil {
@@ -510,6 +468,23 @@ func NewGlobalState(initialJsonData []byte, broadcaster LapUpdateBroadcaster) (*
 				if err != nil {
 					return fmt.Errorf("NewGlobalState failed: could not unmarshal cleaned R.DriverList into target: %w", err)
 				}
+
+				// After unmarshalling, iterate and set starting positions
+				driverList := target.(*map[string]DriverInfo)
+				driversToBroadcast := make(map[string]DriverInfo)
+				for num, driver := range *driverList {
+					if driver.StartingPosition == "" && driver.Line != 0 {
+						driver.StartingPosition = strconv.Itoa(driver.Line)
+						(*driverList)[num] = driver
+						driversToBroadcast[num] = driver
+					}
+				}
+
+				// Broadcast the initial driver list with starting positions
+				if len(driversToBroadcast) > 0 && newState.Broadcaster != nil {
+					newState.Broadcaster.BroadcastDriverListUpdates(driversToBroadcast)
+				}
+
 				return nil
 			}
 
@@ -694,6 +669,8 @@ func (gs *GlobalState) updateDriverList(payloadBytes []byte) error {
 		fmt.Println("Warning: DriverList was nil during update. Initialized empty map.")
 	}
 
+	customUpdatedDrivers := make(map[string]DriverInfo)
+
 	for driverNumber, rawUpdateData := range driverUpdates {
 		existingInfo, found := gs.R.DriverList[driverNumber]
 		if found {
@@ -701,6 +678,10 @@ func (gs *GlobalState) updateDriverList(payloadBytes []byte) error {
 				// Log error for this specific driver update but continue with others
 				fmt.Printf("Warning: Failed to apply partial DriverList update for driver %s: %v. Update data: %s\n", driverNumber, err, string(rawUpdateData))
 				continue
+			}
+			if existingInfo.StartingPosition == "" && existingInfo.Line != 0 {
+				existingInfo.StartingPosition = strconv.Itoa(existingInfo.Line)
+				customUpdatedDrivers[driverNumber] = existingInfo
 			}
 			// We have to restore this in the map, we edited a copy technically
 			gs.R.DriverList[driverNumber] = existingInfo
@@ -711,9 +692,18 @@ func (gs *GlobalState) updateDriverList(payloadBytes []byte) error {
 				fmt.Printf("Warning: Failed to unmarshal new driver data for driver %s: %v. Data: %s\n", driverNumber, err, string(rawUpdateData))
 				continue
 			}
+
+			newDriver.StartingPosition = strconv.Itoa(newDriver.Line)
+			customUpdatedDrivers[driverNumber] = newDriver
+
 			gs.R.DriverList[driverNumber] = newDriver
 		}
 	}
+
+	if len(customUpdatedDrivers) > 0 && gs.Broadcaster != nil {
+		gs.Broadcaster.BroadcastDriverListUpdates(customUpdatedDrivers)
+	}
+
 	return nil
 }
 
@@ -1387,8 +1377,8 @@ func (gs *GlobalState) saveLapToHistory(driverNum string) {
 	gs.R.LapHistoryMap[driverNum] = lapHistory
 
 	// Broadcast the newly completed or updated lap
-	if gs.LapBroadcaster != nil {
-		gs.LapBroadcaster.BroadcastLapHistory(driverNum, newCompletedLap)
+	if gs.Broadcaster != nil {
+		gs.Broadcaster.BroadcastLapHistory(driverNum, newCompletedLap)
 	}
 }
 

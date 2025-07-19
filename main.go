@@ -26,8 +26,8 @@ const (
 )
 
 var (
-	globalState           *model.GlobalState
-	lapHistoryBroadcaster model.LapUpdateBroadcaster
+	globalState            *model.GlobalState
+	customEventBroadcaster model.CustomEventBroadcaster
 )
 
 var (
@@ -60,7 +60,7 @@ func main() {
 	defer sessionRecorder.Stop()
 
 	browserBroadcaster := broadcaster.NewBroadcaster(connectionLimiter, sessionRecorder)
-	lapHistoryBroadcaster = model.NewLapHistoryBroadcaster(browserBroadcaster.Broadcast)
+	customEventBroadcaster = model.NewCustomEventBroadcaster(browserBroadcaster.Broadcast)
 
 	var valkey *valkeyclient.ValkeyClient
 	if valkeyAddr != "" {
@@ -84,7 +84,7 @@ func main() {
 			// R at top level denotes a global state update message
 			if _, ok := signalRMessage["R"].(map[string]interface{}); ok {
 				var err error
-				globalState, err = model.NewGlobalState(message, lapHistoryBroadcaster)
+				globalState, err = model.NewGlobalState(message, customEventBroadcaster)
 				if err != nil {
 					fmt.Printf("Failed to parse global state message: %v\n", err)
 				} else {
@@ -144,7 +144,7 @@ func main() {
 		if globalState == nil {
 			// Initialize with a dummy broadcaster if not already set
 			globalState = model.NewEmptyGlobalState()
-			globalState.LapBroadcaster = lapHistoryBroadcaster
+			globalState.Broadcaster = customEventBroadcaster
 		}
 
 		initialState, err := globalState.GetStateAsJSON()
@@ -239,7 +239,7 @@ func resetGlobalState() {
 		fmt.Println("Resetting global state for new connection.")
 	}
 	globalState = model.NewEmptyGlobalState()
-	globalState.LapBroadcaster = lapHistoryBroadcaster
+	globalState.Broadcaster = customEventBroadcaster
 }
 
 // findActiveEvent checks the schedule for a currently active event based on now time and buffer.
@@ -290,7 +290,7 @@ func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *api.SeasonL
 					fmt.Printf("Error loading state from Valkey: %v\n", err)
 				} else if loadedState != nil {
 					globalState = loadedState
-					globalState.LapBroadcaster = lapHistoryBroadcaster
+					globalState.Broadcaster = customEventBroadcaster
 					fmt.Println("Successfully loaded latest state from Valkey.")
 				} else {
 					fmt.Println("No previous state found in Valkey.")
