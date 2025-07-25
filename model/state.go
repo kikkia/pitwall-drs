@@ -998,28 +998,57 @@ func (gs *GlobalState) updateChampionshipPrediction(payloadBytes []byte) error {
 }
 
 func (gs *GlobalState) updateSessionData(payloadBytes []byte) error {
-	var updatePayload struct {
-		Series       map[string]json.RawMessage `json:"Series,omitempty"`
-		StatusSeries map[string]json.RawMessage `json:"StatusSeries,omitempty"`
-	}
-	if err := json.Unmarshal(payloadBytes, &updatePayload); err != nil {
-		fmt.Printf("Warning: Failed to unmarshal SessionData payload: %v. Payload: %s\n", err, string(payloadBytes))
-		return nil
+	if gs.R.SessionData == nil {
+		gs.R.SessionData = &SessionData{
+			Series:       make([]QualifyingPartInfo, 0),
+			StatusSeries: make([]StatusChangeInfo, 0),
+		}
 	}
 
-	if gs.R.SessionData == nil {
-		gs.R.SessionData = &SessionData{}
-	}
-	if updatePayload.Series != nil {
-		if err := applyMapUpdatesToSlice(&gs.R.SessionData.Series, updatePayload.Series); err != nil {
-			fmt.Printf("Warning: Error applying SessionData.Series updates: %v\n", err)
+	// Handle Series
+	seriesResult := gjson.GetBytes(payloadBytes, "Series")
+	if seriesResult.Exists() {
+		if seriesResult.IsArray() {
+			var newSeries []QualifyingPartInfo
+			if err := json.Unmarshal([]byte(seriesResult.Raw), &newSeries); err != nil {
+				fmt.Printf("Warning: Failed to unmarshal SessionData.Series array: %v. Raw: %s\n", err, seriesResult.Raw)
+			} else {
+				gs.R.SessionData.Series = newSeries
+			}
+		} else if seriesResult.IsObject() {
+			var seriesUpdates map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(seriesResult.Raw), &seriesUpdates); err != nil {
+				fmt.Printf("Warning: Failed to unmarshal SessionData.Series map: %v. Raw: %s\n", err, seriesResult.Raw)
+			} else {
+				if err := applyMapUpdatesToSlice(&gs.R.SessionData.Series, seriesUpdates); err != nil {
+					fmt.Printf("Warning: Error applying SessionData.Series updates: %v\n", err)
+				}
+			}
 		}
 	}
-	if updatePayload.StatusSeries != nil {
-		if err := applyMapUpdatesToSlice(&gs.R.SessionData.StatusSeries, updatePayload.StatusSeries); err != nil {
-			fmt.Printf("Warning: Error applying SessionData.StatusSeries updates: %v\n", err)
+
+	// Handle StatusSeries
+	statusSeriesResult := gjson.GetBytes(payloadBytes, "StatusSeries")
+	if statusSeriesResult.Exists() {
+		if statusSeriesResult.IsArray() {
+			var newStatusSeries []StatusChangeInfo
+			if err := json.Unmarshal([]byte(statusSeriesResult.Raw), &newStatusSeries); err != nil {
+				fmt.Printf("Warning: Failed to unmarshal SessionData.StatusSeries array: %v. Raw: %s\n", err, statusSeriesResult.Raw)
+			} else {
+				gs.R.SessionData.StatusSeries = newStatusSeries
+			}
+		} else if statusSeriesResult.IsObject() {
+			var statusSeriesUpdates map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(statusSeriesResult.Raw), &statusSeriesUpdates); err != nil {
+				fmt.Printf("Warning: Failed to unmarshal SessionData.StatusSeries map: %v. Raw: %s\n", err, statusSeriesResult.Raw)
+			} else {
+				if err := applyMapUpdatesToSlice(&gs.R.SessionData.StatusSeries, statusSeriesUpdates); err != nil {
+					fmt.Printf("Warning: Error applying SessionData.StatusSeries updates: %v\n", err)
+				}
+			}
 		}
 	}
+
 	return nil
 }
 
