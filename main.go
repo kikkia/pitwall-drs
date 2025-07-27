@@ -246,7 +246,7 @@ func resetGlobalState() {
 func findActiveEvent(schedule *model.SeasonSchedule, now time.Time, buffer time.Duration) *model.Event {
 	for _, event := range schedule.Events {
 		connectTime := event.StartTime.Add(-buffer)
-		disconnectTime := event.EndTime.Add(buffer)
+		disconnectTime := event.EndTime.Add(buffer * 2)
 
 		if now.After(connectTime) && now.Before(disconnectTime) {
 			return &event
