@@ -77,8 +77,6 @@ func main() {
 	fmt.Println("Season data loaded.")
 
 	f1tvClient = f1tvclient.NewF1TVClient(func(message []byte) {
-		sessionRecorder.Record(message)
-
 		var signalRMessage map[string]interface{}
 		if err := json.Unmarshal(message, &signalRMessage); err == nil {
 			// R at top level denotes a global state update message
