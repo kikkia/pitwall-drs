@@ -15,11 +15,13 @@ import (
 
 	"f1sockets/broadcaster"
 	"f1sockets/model"
+	"f1sockets/ratelimiter"
+	"f1sockets/recorder"
 )
 
 const (
 	replayListenAddr  = "localhost:8080"
-	recordingFilePath = "recordings/f1tv_events_sa_race.txt"
+	recordingFilePath = "recordings/2025/British_Grand_Prix/Qualifying.txt"
 	startDelay        = 5 * time.Second
 
 	timestampLayout            = time.RFC3339
@@ -27,7 +29,7 @@ const (
 )
 
 var (
-	timeFactor int64 = 5
+	timeFactor int64 = 1
 
 	globalState           *model.GlobalState
 	browserBroadcaster    *broadcaster.Broadcaster
@@ -52,7 +54,16 @@ func main() {
 	log.Printf("Starting F1 Replay Server on %s", replayListenAddr)
 	log.Printf("Will replay events from: %s", recordingFilePath)
 
-	browserBroadcaster = broadcaster.NewBroadcaster()
+	connectionLimiter := ratelimiter.NewConnectionLimiter(100)
+
+	// Recorder setup
+	sessionRecorder := recorder.NewRecorder(2*time.Second, func() *model.GlobalState {
+		return globalState
+	}, false)
+	sessionRecorder.Start()
+	defer sessionRecorder.Stop()
+
+	browserBroadcaster = broadcaster.NewBroadcaster(connectionLimiter, sessionRecorder)
 	lapHistoryBroadcaster = model.NewLapHistoryBroadcaster(browserBroadcaster.Broadcast)
 	globalState = model.NewEmptyGlobalState()
 	globalState.LapBroadcaster = lapHistoryBroadcaster
@@ -163,6 +174,10 @@ func runReplayLogic() {
 
 	var messages []RecordedMessage
 	scanner := bufio.NewScanner(file)
+	// Increase the buffer size to handle long lines
+	const maxCapacity = 1024 * 1024 // 1MB
+	buf := make([]byte, maxCapacity)
+	scanner.Buffer(buf, maxCapacity)
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
@@ -220,7 +235,8 @@ func runReplayLogic() {
 	processAndBroadcastMessage(firstMsg.Payload)
 	previousTimestamp = firstMsg.Timestamp
 
-	raceStart, err := time.Parse(timestampLayout, "2025-04-21T02:02:40+09:00")
+	// raceStart, err := time.Parse(timestampLayout, "2025-07-05T23:00:03+09:00") // quali britan
+	raceStart, err := time.Parse(timestampLayout, "2025-07-06T23:01:51+09:00") // Race br
 	if err != nil {
 		log.Printf("REEEEE %s", err)
 		return
