@@ -233,9 +233,9 @@ type StatusChangeInfo struct {
 }
 
 type TimingData struct {
-	NoEntries   []int                       `json:"NoEntries"` // [20, 15, 10] Q1/Q2/Q3 driver amounts
 	SessionPart int                         `json:"SessionPart"`
 	Lines       map[string]DriverTimingData `json:"Lines"` // Keyed by driver number
+	NoEntries   []int                       `json:"NoEntries"`
 }
 
 type DriverTimingData struct {
@@ -409,8 +409,7 @@ func NewEmptyGlobalState() *GlobalState {
 				StatusSeries: make([]StatusChangeInfo, 0),
 			},
 			TimingData: &TimingData{
-				Lines:     make(map[string]DriverTimingData),
-				NoEntries: make([]int, 0),
+				Lines: make(map[string]DriverTimingData),
 			},
 
 			TeamRadio: &TeamRadioData{
@@ -1054,7 +1053,7 @@ func (gs *GlobalState) updateSessionData(payloadBytes []byte) error {
 
 func (gs *GlobalState) updateTimingData(payloadBytes []byte) error {
 	type TimingDataUpdatePayload struct {
-		NoEntries   []int                      `json:"NoEntries,omitempty"`
+		NoEntries   json.RawMessage            `json:"NoEntries,omitempty"`
 		SessionPart *int                       `json:"SessionPart,omitempty"`
 		Lines       map[string]json.RawMessage `json:"Lines"`
 	}
@@ -1076,7 +1075,37 @@ func (gs *GlobalState) updateTimingData(payloadBytes []byte) error {
 		gs.R.TimingData.SessionPart = *updatePayload.SessionPart
 	}
 	if updatePayload.NoEntries != nil {
-		gs.R.TimingData.NoEntries = updatePayload.NoEntries
+		// It can be an object or an array. Joy.
+		if gjson.ParseBytes(updatePayload.NoEntries).IsObject() {
+			var entriesMap map[string]int
+			if err := json.Unmarshal(updatePayload.NoEntries, &entriesMap); err == nil {
+				if len(entriesMap) > 0 {
+					maxIndex := -1
+					for k := range entriesMap {
+						if idx, err := strconv.Atoi(k); err == nil && idx > maxIndex {
+							maxIndex = idx
+						}
+					}
+
+					if maxIndex > -1 {
+						newEntries := make([]int, maxIndex+1)
+						for k, v := range entriesMap {
+							if idx, err := strconv.Atoi(k); err == nil && idx >= 0 && idx < len(newEntries) {
+								newEntries[idx] = v
+							}
+						}
+						gs.R.TimingData.NoEntries = newEntries
+					}
+				} else {
+					gs.R.TimingData.NoEntries = []int{}
+				}
+			}
+		} else { // Assume array
+			var entries []int
+			if err := json.Unmarshal(updatePayload.NoEntries, &entries); err == nil {
+				gs.R.TimingData.NoEntries = entries
+			}
+		}
 	}
 
 	for driverNumber, rawDriverUpdateData := range updatePayload.Lines {
