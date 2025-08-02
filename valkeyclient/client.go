@@ -96,3 +96,19 @@ func (vc *ValkeyClient) LoadSeasonSchedule(ctx context.Context) (*model.SeasonSc
 
 	return &schedule, nil
 }
+
+func (vc *ValkeyClient) AddCompletedSession(ctx context.Context, uid string) error {
+	err := vc.client.SAdd(ctx, "completed_sessions", uid).Err()
+	if err != nil {
+		return fmt.Errorf("failed to add completed session %s to Valkey: %w", uid, err)
+	}
+	return nil
+}
+
+func (vc *ValkeyClient) IsSessionCompleted(ctx context.Context, uid string) (bool, error) {
+	isMember, err := vc.client.SIsMember(ctx, "completed_sessions", uid).Result()
+	if err != nil {
+		return false, fmt.Errorf("failed to check if session %s is completed in Valkey: %w", uid, err)
+	}
+	return isMember, nil
+}

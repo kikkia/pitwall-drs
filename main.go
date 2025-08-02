@@ -28,6 +28,7 @@ const (
 var (
 	globalState            *model.GlobalState
 	customEventBroadcaster model.CustomEventBroadcaster
+	sessionEndedCount      int
 )
 
 var (
@@ -262,11 +263,32 @@ func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *api.SeasonL
 	activeEvent := findActiveEvent(&schedule, now, bufferDuration)
 
 	if activeEvent != nil {
+		if valkey != nil {
+			completed, err := valkey.IsSessionCompleted(context.Background(), activeEvent.UID)
+			if err != nil {
+				fmt.Printf("Error checking if session is completed: %v\n", err)
+			} else if completed {
+				fmt.Printf("Session '%s' is already completed. Skipping connection.\n", activeEvent.Summary)
+				if client.IsRunning() {
+					fmt.Println("Client is running for a completed session. Stopping it.")
+					client.Stop()
+				}
+				return
+			}
+		}
+
 		if !client.IsRunning() {
 			fmt.Printf("Session '%s' is active. Connecting to F1TV client...\n", activeEvent.Summary)
 			resetGlobalState()
 			client.Start()
 		}
+
+		if client.IsRunning() {
+			if handleFinalisedSessionCheck(client, valkey, activeEvent) {
+				return
+			}
+		}
+
 	} else {
 		if client.IsRunning() {
 			fmt.Println("No active session. Disconnecting F1TV client...")
@@ -279,6 +301,7 @@ func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *api.SeasonL
 				}
 			}
 			client.Stop()
+			sessionEndedCount = 0
 		} else if valkey != nil {
 			// No active event and client is not running, try to load from Valkey
 			if globalState == nil || globalState.R.SessionInfo == nil {
@@ -296,6 +319,44 @@ func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *api.SeasonL
 			}
 		}
 	}
+}
+
+// handleFinalisedSessionCheck checks if the session has ended and stops the client if needed.
+// It returns true if the client was stopped, false otherwise.
+func handleFinalisedSessionCheck(client *f1tvclient.F1TVClient, valkey *valkeyclient.ValkeyClient, activeEvent *model.Event) bool {
+	const endedCountToFinish = 5
+
+	if globalState != nil && globalState.IsSessionFinished() {
+		sessionEndedCount++
+		fmt.Printf("Session is ended. Check %d of %d.\n", sessionEndedCount, endedCountToFinish)
+	} else {
+		sessionEndedCount = 0
+	}
+
+	if sessionEndedCount >= endedCountToFinish {
+		fmt.Println("Session finalised. Disconnecting F1TV client...")
+
+		if valkey != nil {
+			err := valkey.AddCompletedSession(context.Background(), activeEvent.UID)
+			if err != nil {
+				fmt.Printf("Error adding completed session to Valkey: %v\n", err)
+			}
+
+			if globalState != nil {
+				err := valkey.SaveState(context.Background(), globalState)
+				if err != nil {
+					fmt.Printf("Error saving state to Valkey: %v\n", err)
+				} else {
+					fmt.Println("Global state saved to Valkey.")
+				}
+			}
+		}
+
+		client.Stop()
+		sessionEndedCount = 0
+		return true
+	}
+	return false
 }
 
 func manageF1TVConnection(client *f1tvclient.F1TVClient, loader *api.SeasonLoader, valkey *valkeyclient.ValkeyClient) {

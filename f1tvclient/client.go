@@ -102,6 +102,13 @@ func (c *F1TVClient) run() {
 
 			c.readMessages()
 
+			// If we've been told to stop, just exit the loop immediately.
+			select {
+			case <-c.stopChan:
+				return
+			default:
+			}
+
 			fmt.Println("F1TV connection lost. Attempting to reconnect in 5 seconds...")
 			c.conn = nil
 			time.Sleep(5 * time.Second)
