@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/go-kit/log"
 	"github.com/philippseith/signalr"
 )
 
@@ -164,6 +165,7 @@ func (c *F1TVClient) run() {
 		signalr.WithHttpConnection(clientCtx, f1tvBaseURL, signalr.WithHTTPHeaders(headers)),
 		signalr.WithReceiver(&f1Receiver{client: c}),
 		signalr.MaximumReceiveMessageSize(2*1024*1024), // 2MB
+		signalr.Logger(log.NewNopLogger(), false),
 	)
 	if err != nil {
 		fmt.Printf("Error creating SignalR client: %v. Client will not run.\n", err)
@@ -229,6 +231,16 @@ func (c *F1TVClient) subscribeToTopics() {
 			fmt.Printf("Failed to send subscribe message: %v\n", result.Error)
 		} else {
 			fmt.Println("Successfully subscribed to F1TV topics.")
+			// The result of subscribe is the initial state.
+			// We need to wrap it in a format that NewGlobalState expects.
+			wrappedMessage, err := json.Marshal(map[string]interface{}{"R": result.Value})
+			if err != nil {
+				fmt.Printf("Error wrapping subscription result for global state: %v\n", err)
+				return
+			}
+			if c.messageHandler != nil {
+				c.messageHandler(wrappedMessage)
+			}
 		}
 	}()
 }

@@ -40,7 +40,7 @@ var (
 )
 
 func init() {
-	flag.BoolVar(&autoConnect, "auto-connect", true, "Automatically connect/disconnect to F1TV based on session times")
+	flag.BoolVar(&autoConnect, "auto-connect", false, "Automatically connect/disconnect to F1TV based on session times")
 	flag.StringVar(&valkeyAddr, "valkey-addr", os.Getenv("VALKEY_ADDR"), "Address for the Valkey instance. If not set, Valkey is disabled. Can also be set via VALKEY_ADDR env var.")
 }
 
@@ -78,53 +78,67 @@ func main() {
 	fmt.Println("Season data loaded.")
 
 	f1tvClient = f1tvclient.NewF1TVClient(func(message []byte) {
-		var signalRMessage map[string]interface{}
-		if err := json.Unmarshal(message, &signalRMessage); err == nil {
-			// R at top level denotes a global state update message
-			if _, ok := signalRMessage["R"].(map[string]interface{}); ok {
-				var err error
-				globalState, err = model.NewGlobalState(message, customEventBroadcaster)
-				if err != nil {
-					fmt.Printf("Failed to parse global state message: %v\n", err)
-				} else {
-					// Reset the counter on successful global state initialization
-					skippedFeedUpdates = 0
-				}
+		// Always broadcast and record the raw message
+		browserBroadcaster.Broadcast(message)
+		sessionRecorder.Record(message)
+
+		// Try to unmarshal as initial state first {"R":{...}}
+		var rMessage struct {
+			R json.RawMessage `json:"R"`
+		}
+		if json.Unmarshal(message, &rMessage) == nil && rMessage.R != nil {
+			var err error
+			globalState, err = model.NewGlobalState(message, customEventBroadcaster)
+			if err != nil {
+				fmt.Printf("Failed to parse global state message: %v\n", err)
+			} else {
+				// Reset the counter on successful global state initialization
+				skippedFeedUpdates = 0
+				fmt.Println("Global state successfully initialized.")
 			}
-			if mArray, ok := signalRMessage["M"].([]interface{}); ok {
-				for _, msgInterface := range mArray {
-					if msgMap, ok := msgInterface.(map[string]interface{}); ok {
-						// Check if it's a "feed" message
-						if hub, hubOk := msgMap["H"].(string); hubOk && hub == "Streaming" {
-							if method, methodOk := msgMap["M"].(string); methodOk && method == "feed" {
-								if args, argsOk := msgMap["A"].([]interface{}); argsOk {
-									if globalState != nil {
-										err := globalState.ApplyFeedUpdate(args)
-										if err != nil {
-											fmt.Printf("Failed to apply feed update: %v\n Update Args: %v\n", err, args)
-										}
-										// Reset counter on any feed update attempt when global state is present
-										skippedFeedUpdates = 0
-									} else {
-										fmt.Println("Skipping feed update as global state is not yet initialized.")
-										skippedFeedUpdates++
-										if skippedFeedUpdates >= 20 {
-											fmt.Println("20 consecutive feed updates skipped, restarting F1TV client.")
-											f1tvClient.ForceReconnect()
-											skippedFeedUpdates = 0 // Reset after triggering reconnect
-										}
-									}
-								}
-							}
-						}
+			return
+		}
+
+		// Try to unmarshal as a feed update ["Topic", {...data...}]
+		var feedArgs []json.RawMessage
+		if json.Unmarshal(message, &feedArgs) == nil {
+			if len(feedArgs) >= 2 {
+				if globalState != nil {
+					var topic string
+					if err := json.Unmarshal(feedArgs[0], &topic); err != nil {
+						fmt.Printf("Failed to unmarshal feed topic: %v\n", err)
+						return
+					}
+
+					var payload interface{}
+					if err := json.Unmarshal(feedArgs[1], &payload); err != nil {
+						fmt.Printf("Failed to unmarshal feed payload: %v\n", err)
+						return
+					}
+
+					err := globalState.ApplyFeedUpdate([]interface{}{topic, payload})
+					if err != nil {
+						// This can be noisy, so maybe comment out for production
+						// fmt.Printf("Failed to apply feed update for topic %s: %v\n", topic, err)
+					}
+					skippedFeedUpdates = 0
+				} else {
+					skippedFeedUpdates++
+					if skippedFeedUpdates%10 == 0 {
+						fmt.Printf("Skipping feed update, global state not yet initialized (%d skipped).\n", skippedFeedUpdates)
+					}
+					if skippedFeedUpdates >= 50 { // Increased threshold
+						fmt.Println("50 consecutive feed updates skipped, restarting F1TV client.")
+						f1tvClient.ForceReconnect()
+						skippedFeedUpdates = 0 // Reset after triggering reconnect
 					}
 				}
 			}
-		} else {
-			fmt.Printf("Failed to parse received message as JSON: %v\n", err)
+			return
 		}
 
-		browserBroadcaster.Broadcast(message)
+		// If it's neither, log it as an unknown message format
+		fmt.Printf("Unknown message format received: %s\n", string(message))
 	})
 
 	if autoConnect {
