@@ -3,6 +3,7 @@ package auth
 import (
 	"bytes"
 	"encoding/json"
+	"f1sockets/metrics"
 	"fmt"
 	"io"
 	"net/http"
@@ -64,44 +65,55 @@ func Authenticate() (string, error) {
 	}
 
 	fmt.Println("No valid cached token found. Fetching new token from auth service.")
+	metrics.TokenFetch()
 
 	email := os.Getenv("F1_EMAIL")
 	password := os.Getenv("F1_PASSWORD")
 	authURL := os.Getenv("F1_AUTH_URL")
 
 	if email == "" || password == "" || authURL == "" {
-		return "", fmt.Errorf("F1_EMAIL, F1_PASSWORD, and F1_AUTH_URL environment variables must be set")
+		err := fmt.Errorf("F1_EMAIL, F1_PASSWORD, and F1_AUTH_URL environment variables must be set")
+		metrics.TokenFetchFailed()
+		return "", err
 	}
 
 	reqBody, err := json.Marshal(authRequestPayload{Email: email, Password: password})
 	if err != nil {
+		metrics.TokenFetchFailed()
 		return "", fmt.Errorf("failed to marshal auth request body: %w", err)
 	}
 
 	req, err := http.NewRequest("POST", authURL, bytes.NewBuffer(reqBody))
 	if err != nil {
+		metrics.TokenFetchFailed()
 		return "", fmt.Errorf("failed to create auth request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		metrics.TokenFetchFailed()
 		return "", fmt.Errorf("failed to execute auth request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("auth service returned non-OK status %d: %s", resp.StatusCode, string(bodyBytes))
+		err := fmt.Errorf("auth service returned non-OK status %d: %s", resp.StatusCode, string(bodyBytes))
+		metrics.TokenFetchFailed()
+		return "", err
 	}
 
 	var respPayload authResponsePayload
 	if err := json.NewDecoder(resp.Body).Decode(&respPayload); err != nil {
+		metrics.TokenFetchFailed()
 		return "", fmt.Errorf("failed to decode auth response: %w", err)
 	}
 
 	if respPayload.LoginSession.SubscriptionToken == "" {
-		return "", fmt.Errorf("auth service response did not contain a subscription token")
+		err := fmt.Errorf("auth service response did not contain a subscription token")
+		metrics.TokenFetchFailed()
+		return "", err
 	}
 
 	// Update the cache
@@ -109,6 +121,7 @@ func Authenticate() (string, error) {
 	tokenCache.expires = time.Unix(respPayload.LoginSession.Expires, 0)
 
 	fmt.Printf("Successfully fetched and cached new F1TV token. Expires at: %s\n", tokenCache.expires.Format(time.RFC3339))
+	metrics.TokenFetchSuccess()
 
 	return tokenCache.token, nil
 }
