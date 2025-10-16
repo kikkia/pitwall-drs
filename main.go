@@ -10,6 +10,7 @@ import (
 
 	"context"
 	"f1sockets/api"
+	"f1sockets/auth"
 	"f1sockets/broadcaster"
 	"f1sockets/f1tvclient"
 	"f1sockets/metrics"
@@ -268,6 +269,63 @@ func findActiveEvent(schedule *model.SeasonSchedule, now time.Time, buffer time.
 	return nil
 }
 
+// findRaceWeekendEvents finds all events for the next upcoming race weekend.
+func findRaceWeekendEvents(schedule *model.SeasonSchedule, now time.Time) []model.Event {
+	var nextEvent *model.Event
+	minDiff := time.Duration(-1)
+
+	// First, find the very next event
+	for i := range schedule.Events {
+		event := schedule.Events[i]
+		diff := event.StartTime.Sub(now)
+		if diff > 0 && (minDiff == -1 || diff < minDiff) {
+			minDiff = diff
+			nextEvent = &event
+		}
+	}
+
+	if nextEvent == nil {
+		return nil // No upcoming events
+	}
+
+	// Now, find all events for that weekend (same location, close in time)
+	var weekendEvents []model.Event
+	weekendWindow := 4 * 24 * time.Hour // 4 days to be safe
+	for _, event := range schedule.Events {
+		if event.Location == nextEvent.Location {
+			if event.StartTime.After(nextEvent.StartTime.Add(-weekendWindow)) && event.StartTime.Before(nextEvent.StartTime.Add(weekendWindow)) {
+				weekendEvents = append(weekendEvents, event)
+			}
+		}
+	}
+	return weekendEvents
+}
+
+// needsTokenRefresh checks if the auth token will expire before the end of the next race weekend.
+func needsTokenRefresh(schedule *model.SeasonSchedule, now time.Time) bool {
+	weekendEvents := findRaceWeekendEvents(schedule, now)
+	if len(weekendEvents) == 0 {
+		return false // No upcoming events, no need to refresh
+	}
+
+	// Find the end time of the last event in the weekend
+	var lastEndTime time.Time
+	for _, event := range weekendEvents {
+		if event.EndTime.After(lastEndTime) {
+			lastEndTime = event.EndTime
+		}
+	}
+
+	// If the token expires before the end of the race weekend, we need a new one.
+	tokenExpiry := auth.TokenExpiresAt()
+	if tokenExpiry.IsZero() || tokenExpiry.Before(lastEndTime) {
+		fmt.Printf("Token refresh needed. Current expiry: %s, Race weekend ends: %s\n", tokenExpiry.Format(time.RFC3339), lastEndTime.Format(time.RFC3339))
+		return true
+	}
+
+	return false
+}
+
 // checkAndManageConnection contains the core logic for deciding whether to connect or disconnect.
 func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *api.SeasonLoader, valkey *valkeyclient.ValkeyClient) {
 	const bufferDuration = 14 * time.Minute
@@ -304,6 +362,17 @@ func checkAndManageConnection(client *f1tvclient.F1TVClient, loader *api.SeasonL
 		}
 
 	} else {
+		// If no session is active, check if we need to pre-authenticate for the upcoming weekend.
+		if needsTokenRefresh(&schedule, now) {
+			fmt.Println("Token needs refresh for the upcoming race weekend. Triggering authentication.")
+			go func() {
+				_, err := auth.Authenticate()
+				if err != nil {
+					fmt.Printf("Error during pre-authentication: %v\n", err)
+				}
+			}()
+		}
+
 		if client.IsRunning() {
 			fmt.Println("No active session. Disconnecting F1TV client...")
 			if valkey != nil && globalState != nil {
@@ -374,7 +443,7 @@ func handleFinalisedSessionCheck(client *f1tvclient.F1TVClient, valkey *valkeycl
 }
 
 func manageF1TVConnection(client *f1tvclient.F1TVClient, loader *api.SeasonLoader, valkey *valkeyclient.ValkeyClient) {
-	const checkInterval = 1 * time.Minute
+	const checkInterval = 2 * time.Minute
 
 	// Run once immediately on start to avoid initial delay
 	checkAndManageConnection(client, loader, valkey)

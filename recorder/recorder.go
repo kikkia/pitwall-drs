@@ -4,7 +4,6 @@ import (
 	"f1sockets/model"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -111,21 +110,22 @@ func (r *Recorder) flush() {
 }
 
 func (r *Recorder) getRecordingFilePath() string {
-	globalState := r.globalStateProvider()
-	if globalState == nil || globalState.R.SessionInfo == nil || globalState.R.SessionInfo.Path == "" {
-		return ""
-	}
+	return "test.txt"
+	// globalState := r.globalStateProvider()
+	// if globalState == nil || globalState.R.SessionInfo == nil || globalState.R.SessionInfo.Path == "" {
+	// 	return ""
+	// }
 
-	formattedPath := formatSessionPath(globalState.R.SessionInfo.Path)
-	fullPath := "recordings/" + formattedPath + ".txt"
+	// formattedPath := formatSessionPath(globalState.R.SessionInfo.Path)
+	// fullPath := "recordings/" + formattedPath + ".txt"
 
-	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		fmt.Printf("Recorder: Error creating directory %s: %v\n", dir, err)
-		return ""
-	}
+	// dir := filepath.Dir(fullPath)
+	// if err := os.MkdirAll(dir, 0755); err != nil {
+	// 	fmt.Printf("Recorder: Error creating directory %s: %v\n", dir, err)
+	// 	return ""
+	// }
 
-	return fullPath
+	// return fullPath
 }
 
 // takes a session path like "2025/2025-06-15_Canadian_Grand_Prix/2025-06-13_Practice_1/"
