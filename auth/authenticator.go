@@ -12,13 +12,11 @@ import (
 	"time"
 )
 
-// authRequestPayload defines the structure for the authentication request.
 type authRequestPayload struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
-// authResponsePayload defines the structure for the authentication response.
 type authResponsePayload struct {
 	LoginSession struct {
 		Expires           int64  `json:"expires"`
@@ -27,24 +25,17 @@ type authResponsePayload struct {
 }
 
 var (
-	// tokenCache stores the authentication token and its expiration time.
 	tokenCache struct {
 		sync.RWMutex
 		token   string
 		expires time.Time
 	}
-	// httpClient is a shared HTTP client for authentication requests.
 	httpClient = &http.Client{Timeout: 90 * time.Second}
 )
 
-// Authenticate handles the F1TV authentication process.
-// It first checks for a valid cached token. If the token is expired or not present,
-// it attempts to fetch a new one from the authentication service using credentials
-// from environment variables.
 func Authenticate() (string, error) {
-	// Check for a valid, non-expired token in the cache first.
 	tokenCache.RLock()
-	// Check if token expires in more than an hour
+
 	if tokenCache.token != "" && time.Now().Before(tokenCache.expires.Add(-1*time.Hour)) {
 		fmt.Println("Using cached F1TV token.")
 		token := tokenCache.token
@@ -53,15 +44,19 @@ func Authenticate() (string, error) {
 	}
 	tokenCache.RUnlock()
 
-	// If cache is invalid, acquire a lock to fetch a new token.
 	tokenCache.Lock()
 	defer tokenCache.Unlock()
 
-	// Re-check the cache after acquiring the lock, in case another goroutine
-	// just refreshed it.
 	if tokenCache.token != "" && time.Now().Before(tokenCache.expires.Add(-1*time.Hour)) {
 		fmt.Println("Using cached F1TV token (refreshed by another process).")
 		return tokenCache.token, nil
+	}
+
+	if token := os.Getenv("F1_TV_TOKEN"); token != "" {
+		fmt.Println("Using F1_TV_TOKEN from environment variable for testing and caching it.")
+		tokenCache.token = token
+		tokenCache.expires = time.Now().AddDate(10, 0, 0)
+		return token, nil
 	}
 
 	fmt.Println("No valid cached token found. Fetching new token from auth service.")
@@ -126,8 +121,6 @@ func Authenticate() (string, error) {
 	return tokenCache.token, nil
 }
 
-// TokenExpiresAt returns the expiration time of the cached token.
-// It returns a zero time.Time if no token is cached.
 func TokenExpiresAt() time.Time {
 	tokenCache.RLock()
 	defer tokenCache.RUnlock()
