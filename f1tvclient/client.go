@@ -29,7 +29,9 @@ type f1Receiver struct {
 }
 
 // Feed is the callback for the "feed" hub method from the SignalR stream.
-func (r *f1Receiver) Feed(message []json.RawMessage) {
+func (r *f1Receiver) Feed(rawTopic json.RawMessage, rawData json.RawMessage, rawTs json.RawMessage) {
+	message := []json.RawMessage{rawTopic, rawData, rawTs}
+
 	if r.client.messageHandler == nil {
 		return
 	}
@@ -166,6 +168,7 @@ func (c *F1TVClient) run() {
 		signalr.WithReceiver(&f1Receiver{client: c}),
 		signalr.MaximumReceiveMessageSize(2*1024*1024), // 2MB
 		signalr.Logger(log.NewNopLogger(), false),
+		//signalr.Logger(log.NewLogfmtLogger(os.Stderr), true),
 	)
 	if err != nil {
 		fmt.Printf("Error creating SignalR client: %v. Client will not run.\n", err)
@@ -182,6 +185,7 @@ func (c *F1TVClient) run() {
 	for {
 		select {
 		case <-c.stopChan:
+			fmt.Println("Stopped the F1TV Connection")
 			return
 		case state := <-stateChan:
 			switch state {
@@ -190,6 +194,9 @@ func (c *F1TVClient) run() {
 				c.subscribeToTopics()
 			case signalr.ClientClosed:
 				fmt.Println("F1TV connection lost. Attempting to reconnect...")
+				fmt.Println("DEBUG: Client state changed to: Closed.")
+			default:
+				fmt.Printf("DEBUG: Client state changed to: UNKNOWN (%v)\n", state)
 			}
 		}
 	}
