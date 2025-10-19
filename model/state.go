@@ -427,7 +427,7 @@ func NewEmptyGlobalState() *GlobalState {
 	}
 }
 
-func NewGlobalState(initialJsonData []byte, broadcaster CustomEventBroadcaster) (*GlobalState, error) {
+func NewGlobalState(initialJsonData []byte, broadcaster CustomEventBroadcaster, oldState *GlobalState) (*GlobalState, error) {
 	newState := NewEmptyGlobalState()
 	newState.Broadcaster = broadcaster
 
@@ -541,6 +541,22 @@ func NewGlobalState(initialJsonData []byte, broadcaster CustomEventBroadcaster) 
 			// The newState object might be partially populated.
 			fmt.Printf("Error populating NewGlobalState field (%s): %v\n", key, err)
 			return nil, err
+		}
+	}
+
+	// If we have an old state, check if we should carry over the lap history.
+	if oldState != nil && oldState.R.LapHistoryMap != nil {
+		// If the session key is the same, it's a reconnect within the same session.
+		// If the new state has no session info, we can probably assume it's the same session.
+		if oldState.R.SessionInfo != nil && newState.R.SessionInfo != nil &&
+			oldState.R.SessionInfo.Key == newState.R.SessionInfo.Key {
+			newState.R.LapHistoryMap = oldState.R.LapHistoryMap
+			fmt.Println("Reconnected to the same session, preserving lap history.")
+		} else if newState.R.SessionInfo == nil {
+			newState.R.LapHistoryMap = oldState.R.LapHistoryMap
+			fmt.Println("New state has no session info, preserving lap history as a precaution.")
+		} else {
+			fmt.Println("New session detected, resetting lap history.")
 		}
 	}
 

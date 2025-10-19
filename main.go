@@ -89,7 +89,7 @@ func main() {
 		}
 		if json.Unmarshal(message, &rMessage) == nil && rMessage.R != nil {
 			var err error
-			globalState, err = model.NewGlobalState(message, customEventBroadcaster)
+			globalState, err = model.NewGlobalState(message, customEventBroadcaster, globalState)
 			if err != nil {
 				fmt.Printf("Failed to parse global state message: %v\n", err)
 			} else {
