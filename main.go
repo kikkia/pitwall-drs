@@ -129,10 +129,10 @@ func main() {
 					if skippedFeedUpdates%10 == 0 {
 						fmt.Printf("Skipping feed update, global state not yet initialized (%d skipped).\n", skippedFeedUpdates)
 					}
-					if skippedFeedUpdates >= 50 { // Increased threshold
+					if skippedFeedUpdates >= 50 {
 						fmt.Println("50 consecutive feed updates skipped, restarting F1TV client.")
 						f1tvClient.ForceReconnect()
-						skippedFeedUpdates = 0 // Reset after triggering reconnect
+						skippedFeedUpdates = 0
 					}
 				}
 			}
