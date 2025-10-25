@@ -112,3 +112,52 @@ func (vc *ValkeyClient) IsSessionCompleted(ctx context.Context, uid string) (boo
 	}
 	return isMember, nil
 }
+
+type LoginSession struct {
+	Session string `json:"session"`
+	Expires int64  `json:"expires"`
+}
+
+func (vc *ValkeyClient) StoreLoginSession(ctx context.Context, session string, expires int64) error {
+	loginSession := LoginSession{
+		Session: session,
+		Expires: expires,
+	}
+	sessionJSON, err := json.Marshal(loginSession)
+	if err != nil {
+		return fmt.Errorf("failed to marshal login session: %w", err)
+	}
+
+	ttl := time.Until(time.Unix(expires, 0))
+	if ttl <= 0 {
+		return nil
+	}
+
+	err = vc.client.Set(ctx, "login_session", sessionJSON, ttl).Err()
+	if err != nil {
+		return fmt.Errorf("failed to save login session to Valkey: %w", err)
+	}
+	return nil
+}
+
+func (vc *ValkeyClient) GetLoginSession(ctx context.Context) (*LoginSession, error) {
+	sessionJSON, err := vc.client.Get(ctx, "login_session").Result()
+	if err == redis.Nil {
+		return nil, nil // No session found
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get login session from Valkey: %w", err)
+	}
+
+	var loginSession LoginSession
+	if err := json.Unmarshal([]byte(sessionJSON), &loginSession); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal login session: %w", err)
+	}
+
+	// Safeguard: check for expiration in case TTL is not perfectly synchronized.
+	if time.Now().Unix() > loginSession.Expires {
+		return nil, nil // Session is expired
+	}
+
+	return &loginSession, nil
+}

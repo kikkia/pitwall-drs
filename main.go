@@ -68,6 +68,7 @@ func main() {
 	if valkeyAddr != "" {
 		fmt.Printf("Valkey integration enabled, connecting to %s\n", valkeyAddr)
 		valkey = valkeyclient.NewValkeyClient(valkeyAddr)
+		auth.SetValkeyClient(valkey)
 	}
 
 	seasonLoader := api.NewSeasonLoader(24*time.Hour, valkey)

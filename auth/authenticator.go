@@ -2,8 +2,10 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"f1sockets/metrics"
+	"f1sockets/valkeyclient"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,24 +33,46 @@ var (
 		expires time.Time
 	}
 	httpClient = &http.Client{Timeout: 90 * time.Second}
+	valkey     *valkeyclient.ValkeyClient
 )
+
+func SetValkeyClient(client *valkeyclient.ValkeyClient) {
+	valkey = client
+}
 
 func Authenticate() (string, error) {
 	tokenCache.RLock()
-
 	if tokenCache.token != "" && time.Now().Before(tokenCache.expires.Add(-1*time.Hour)) {
-		fmt.Println("Using cached F1TV token.")
+		fmt.Println("Using in-memory cached F1TV token.")
 		token := tokenCache.token
 		tokenCache.RUnlock()
 		return token, nil
 	}
 	tokenCache.RUnlock()
 
+	if valkey != nil {
+		session, err := valkey.GetLoginSession(context.Background())
+		if err != nil {
+			fmt.Printf("Error getting login session from Valkey: %v\n", err)
+		} else if session != nil && time.Now().Unix() < session.Expires {
+			fmt.Println("Using F1TV token from durable cache (Valkey).")
+			// valkey -> in-mem
+			tokenCache.Lock()
+			if tokenCache.token == "" || tokenCache.expires.Unix() < session.Expires {
+				tokenCache.token = session.Session
+				tokenCache.expires = time.Unix(session.Expires, 0)
+			}
+			token := tokenCache.token
+			tokenCache.Unlock()
+			return token, nil
+		}
+	}
+
 	tokenCache.Lock()
 	defer tokenCache.Unlock()
 
 	if tokenCache.token != "" && time.Now().Before(tokenCache.expires.Add(-1*time.Hour)) {
-		fmt.Println("Using cached F1TV token (refreshed by another process).")
+		fmt.Println("Using in-memory cached F1TV token (refreshed by another process).")
 		return tokenCache.token, nil
 	}
 
@@ -111,9 +135,16 @@ func Authenticate() (string, error) {
 		return "", err
 	}
 
-	// Update the cache
 	tokenCache.token = respPayload.LoginSession.SubscriptionToken
 	tokenCache.expires = time.Unix(respPayload.LoginSession.Expires, 0)
+
+	if valkey != nil {
+		fmt.Println("Storing new F1TV token in valkey cache.")
+		err := valkey.StoreLoginSession(context.Background(), respPayload.LoginSession.SubscriptionToken, respPayload.LoginSession.Expires)
+		if err != nil {
+			fmt.Printf("Warning: Failed to store login session in Valkey: %v\n", err)
+		}
+	}
 
 	fmt.Printf("Successfully fetched and cached new F1TV token. Expires at: %s\n", tokenCache.expires.Format(time.RFC3339))
 	metrics.TokenFetchSuccess()
