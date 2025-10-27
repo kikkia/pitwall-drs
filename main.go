@@ -81,7 +81,7 @@ func main() {
 	seasonLoader.WaitUntilReady()
 	fmt.Println("Season data loaded.")
 
-	messageHandlers := handlers.NewMessageHandlers(&globalState, customEventBroadcaster, browserBroadcaster, sessionRecorder, f1tvClient, &skippedFeedUpdates)
+	messageHandlers := handlers.NewMessageHandlers(&globalState, customEventBroadcaster, browserBroadcaster, f1tvClient, &skippedFeedUpdates)
 	f1tvClient = f1tvclient.NewF1TVClient(messageHandlers.HandleNewStreamMessage, messageHandlers.HandleLegacyStreamMessage)
 
 	if autoConnect {

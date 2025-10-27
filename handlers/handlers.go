@@ -5,7 +5,6 @@ import (
 	"f1sockets/broadcaster"
 	"f1sockets/f1tvclient"
 	"f1sockets/model"
-	"f1sockets/recorder"
 	"fmt"
 	"strings"
 )
@@ -14,17 +13,15 @@ type MessageHandlers struct {
 	GlobalState            **model.GlobalState
 	CustomEventBroadcaster model.CustomEventBroadcaster
 	BrowserBroadcaster     *broadcaster.Broadcaster
-	SessionRecorder        *recorder.Recorder
 	F1TVClient             *f1tvclient.F1TVClient
 	SkippedFeedUpdates     *int
 }
 
-func NewMessageHandlers(gs **model.GlobalState, ceb model.CustomEventBroadcaster, bb *broadcaster.Broadcaster, sr *recorder.Recorder, f1c *f1tvclient.F1TVClient, sfu *int) *MessageHandlers {
+func NewMessageHandlers(gs **model.GlobalState, ceb model.CustomEventBroadcaster, bb *broadcaster.Broadcaster, f1c *f1tvclient.F1TVClient, sfu *int) *MessageHandlers {
 	return &MessageHandlers{
 		GlobalState:            gs,
 		CustomEventBroadcaster: ceb,
 		BrowserBroadcaster:     bb,
-		SessionRecorder:        sr,
 		F1TVClient:             f1c,
 		SkippedFeedUpdates:     sfu,
 	}
@@ -32,7 +29,6 @@ func NewMessageHandlers(gs **model.GlobalState, ceb model.CustomEventBroadcaster
 
 func (h *MessageHandlers) HandleNewStreamMessage(message []byte) {
 	h.BrowserBroadcaster.Broadcast(message)
-	h.SessionRecorder.Record(message)
 
 	var rMessage struct {
 		R json.RawMessage `json:"R"`
@@ -90,7 +86,6 @@ func (h *MessageHandlers) HandleNewStreamMessage(message []byte) {
 
 func (h *MessageHandlers) HandleLegacyStreamMessage(message []byte) {
 	h.BrowserBroadcaster.Broadcast(message)
-	h.SessionRecorder.Record(message)
 
 	var msgData struct {
 		R json.RawMessage   `json:"R"`
