@@ -1,3 +1,5 @@
+Main backend for the F1 live data analysis site: https://pitwall.me/
+
 # pitwall-drs (Data Relay Service)
 This is designed to act as a proxy and fanout for the Formula 1 TV live timing data stream (SignalR).
 
