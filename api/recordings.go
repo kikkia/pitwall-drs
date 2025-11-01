@@ -122,7 +122,7 @@ func HandleRecordings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*") // for local dev
 
-	recordings := make(map[string][]string)
+	recordings := make(map[string][]RecordingInfo)
 	recordingsRoot := "recordings"
 
 	err := filepath.Walk(recordingsRoot, func(path string, info os.FileInfo, err error) error {
@@ -130,11 +130,31 @@ func HandleRecordings(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".txt") {
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".meta.json") {
+			metaBytes, err := os.ReadFile(path)
+			if err != nil {
+				fmt.Printf("Error reading metadata file %s: %v\n", path, err)
+				return nil
+			}
+
+			var metadata RecordingMetadata
+			if err := json.Unmarshal(metaBytes, &metadata); err != nil {
+				fmt.Printf("Error unmarshaling metadata file %s: %v\n", path, err)
+				return nil
+			}
+
+			txtPath := strings.TrimSuffix(path, ".meta.json")
+			recordingInfo := RecordingInfo{
+				Path:            filepath.ToSlash(txtPath),
+				SessionType:     metadata.SessionType,
+				FinishedAt:      metadata.FinishedAt,
+				TopThree:        metadata.TopThree,
+				CountryFlagCode: metadata.CountryFlagCode,
+			}
+
 			dir := filepath.Dir(path)
-			// Use ToSlash for consistent path separators in the JSON output
 			dir = filepath.ToSlash(dir)
-			recordings[dir] = append(recordings[dir], filepath.ToSlash(path))
+			recordings[dir] = append(recordings[dir], recordingInfo)
 		}
 		return nil
 	})

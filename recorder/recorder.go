@@ -1,6 +1,7 @@
 package recorder
 
 import (
+	"encoding/json"
 	"f1sockets/model"
 	"fmt"
 	"os"
@@ -53,6 +54,7 @@ func (r *Recorder) Stop() {
 		close(r.stopChan)
 		r.flushTicker.Stop()
 		r.flush()
+		r.generateAndSaveMetadata()
 	}
 }
 
@@ -107,6 +109,42 @@ func (r *Recorder) flush() {
 
 	if _, err := f.WriteString(strings.Join(toWrite, "\n") + "\n"); err != nil {
 		fmt.Printf("Recorder: Failed to write log batch: %v\n", err)
+	}
+}
+
+func (r *Recorder) generateAndSaveMetadata() {
+	if !r.recordingEnabled {
+		return
+	}
+
+	globalState := r.globalStateProvider()
+	if globalState == nil || !globalState.IsSessionFinished() {
+		// Don't generate metadata if the session isn't properly finished.
+		return
+	}
+
+	recordingPath := r.getRecordingFilePath()
+	if recordingPath == "" {
+		return
+	}
+
+	metadata, err := GenerateMetadataFromState(globalState)
+	if err != nil {
+		fmt.Printf("Recorder: Failed to generate metadata for %s: %v\n", recordingPath, err)
+		return
+	}
+
+	metadataPath := strings.TrimSuffix(recordingPath, ".txt") + ".meta.json"
+	metadataBytes, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		fmt.Printf("Recorder: Failed to marshal metadata for %s: %v\n", recordingPath, err)
+		return
+	}
+
+	if err := os.WriteFile(metadataPath, metadataBytes, 0644); err != nil {
+		fmt.Printf("Recorder: Failed to write metadata file %s: %v\n", metadataPath, err)
+	} else {
+		fmt.Printf("Recorder: Successfully generated and saved metadata to %s\n", metadataPath)
 	}
 }
 
