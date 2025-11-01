@@ -1,0 +1,188 @@
+package f1tvclient
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+func (c *F1TVClient) runLegacy() {
+	defer func() {
+		c.isRunning = false
+	}()
+
+	for {
+		select {
+		case <-c.stopChan:
+			return
+		default:
+			if !c.isRunning {
+				return
+			}
+
+			fmt.Println("Attempting to connect to F1TV SignalR (Legacy)...")
+			token, cookie, err := negotiate()
+			if err != nil {
+				fmt.Printf("Negotiation failed: %v. Retrying in 5 seconds...\n", err)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+			fmt.Println("Negotiation successful.")
+
+			conn, err := connectF1TVWebSocket(token, cookie)
+			if err != nil {
+				fmt.Printf("F1TV WebSocket connection failed: %v. Retrying in 5 seconds...\n", err)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+			c.legacyConn = conn
+			fmt.Println("Connected to F1TV WebSocket.")
+
+			sendSubscribeMessage(c.legacyConn)
+
+			c.readMessages()
+
+			select {
+			case <-c.stopChan:
+				return
+			default:
+			}
+
+			fmt.Println("F1TV connection lost. Attempting to reconnect in 5 seconds...")
+			c.legacyConn = nil
+			time.Sleep(5 * time.Second)
+		}
+	}
+}
+
+func (c *F1TVClient) readMessages() {
+	defer func() {
+		if c.legacyConn != nil {
+			c.legacyConn.Close()
+		}
+	}()
+	for {
+		select {
+		case <-c.stopChan:
+			return
+		default:
+			_, message, err := c.legacyConn.ReadMessage()
+			if err != nil {
+				return
+			}
+
+			if c.legacyStreamHandler != nil {
+				c.legacyStreamHandler(message)
+			}
+		}
+	}
+}
+
+func negotiate() (string, string, error) {
+	connectionData := url.QueryEscape(fmt.Sprintf(`[{"name":"%s"}]`, hubName))
+	negotiateURL := fmt.Sprintf("%s/negotiate?connectionData=%s&clientProtocol=%s", oldStreamUrl, connectionData, clientProtocol)
+
+	resp, err := http.Get(negotiateURL)
+	if err != nil {
+		return "", "", fmt.Errorf("http GET error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", "", fmt.Errorf("negotiate failed with status code %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read negotiate response body: %w", err)
+	}
+
+	var negotiateResp NegotiateResponse
+	err = json.Unmarshal(bodyBytes, &negotiateResp)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to parse negotiate response JSON: %w", err)
+	}
+
+	cookie := ""
+	setCookieHeaders, ok := resp.Header["Set-Cookie"]
+	if ok && len(setCookieHeaders) > 0 {
+		parts := strings.Split(setCookieHeaders[0], ";")
+		cookie = parts[0]
+	}
+
+	if negotiateResp.ConnectionToken == "" {
+		return "", "", fmt.Errorf("connection token is empty in negotiate response")
+	}
+
+	return negotiateResp.ConnectionToken, cookie, nil
+}
+
+func connectF1TVWebSocket(token, cookie string) (*websocket.Conn, error) {
+	encodedToken := url.QueryEscape(token)
+	connectionData := url.QueryEscape(fmt.Sprintf(`[{"name":"%s"}]`, hubName))
+	wsURL := fmt.Sprintf("wss://livetiming.formula1.com/signalr/connect?clientProtocol=%s&transport=webSockets&connectionToken=%s&connectionData=%s", clientProtocol, encodedToken, connectionData)
+
+	headers := http.Header{}
+	headers.Add("User-Agent", "f1-testing")
+	headers.Add("Accept-Encoding", "gzip,identity")
+	if cookie != "" {
+		headers.Add("Cookie", cookie)
+	}
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		return nil, fmt.Errorf("websocket dial error: %w", err)
+	}
+
+	return conn, nil
+}
+
+func sendSubscribeMessage(conn *websocket.Conn) {
+	topics := []string{
+		"Heartbeat",
+		"CarData.z",
+		"Position.z",
+		"ExtrapolatedClock",
+		"TopThree",
+		"TimingStats",
+		"TimingAppData",
+		"WeatherData",
+		"TrackStatus",
+		"DriverList",
+		"RaceControlMessages",
+		"SessionInfo",
+		"SessionData",
+		"LapCount",
+		"TimingData",
+		"ChampionshipPrediction",
+		"TeamRadio",
+		"TyreStintSeries",
+	}
+
+	subscribeMessage := map[string]interface{}{
+		"H": hubName,
+		"M": "Subscribe",
+		"A": []interface{}{topics},
+		"I": 1,
+	}
+
+	message, err := json.Marshal(subscribeMessage)
+	if err != nil {
+		fmt.Printf("Failed to marshal subscribe message: %v\n", err)
+		return
+	}
+
+	err = conn.WriteMessage(websocket.TextMessage, message)
+	if err != nil {
+		fmt.Printf("Failed to send subscribe message: %v\n", err)
+	} else {
+		fmt.Println("Subscribe message sent to F1TV.")
+	}
+}

@@ -89,3 +89,24 @@ func InstrumentHandler(handler http.Handler) http.Handler {
 		Client.Incr("f1_socket_proxy.api.requests_total", tags, 1)
 	})
 }
+
+func TokenFetch() {
+	if Client == nil {
+		return
+	}
+	Client.Incr("f1_socket_proxy.auth.token_fetch", nil, 1)
+}
+
+func TokenFetchSuccess() {
+	if Client == nil {
+		return
+	}
+	Client.Incr("f1_socket_proxy.auth.token_fetch_success", nil, 1)
+}
+
+func TokenFetchFailed() {
+	if Client == nil {
+		return
+	}
+	Client.Incr("f1_socket_proxy.auth.token_fetch_failed", nil, 1)
+}
