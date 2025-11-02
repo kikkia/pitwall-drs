@@ -143,7 +143,7 @@ func HandleRecordings(w http.ResponseWriter, r *http.Request) {
 				return nil
 			}
 
-			txtPath := strings.TrimSuffix(path, ".meta.json")
+			txtPath := strings.TrimSuffix(path, ".meta.json") + ".txt"
 			recordingInfo := RecordingInfo{
 				Path:            filepath.ToSlash(txtPath),
 				SessionType:     metadata.SessionType,
