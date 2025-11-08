@@ -118,8 +118,7 @@ func (r *Recorder) generateAndSaveMetadata() {
 	}
 
 	globalState := r.globalStateProvider()
-	if globalState == nil || !globalState.IsSessionFinished() {
-		// Don't generate metadata if the session isn't properly finished.
+	if globalState == nil {
 		return
 	}
 
