@@ -560,6 +560,22 @@ func NewGlobalState(initialJsonData []byte, broadcaster CustomEventBroadcaster, 
 		}
 	}
 
+	// If we have an old state, check if we should carry over the starting positions.
+	if oldState != nil && oldState.R.DriverList != nil {
+		if oldState.R.SessionInfo != nil && newState.R.SessionInfo != nil &&
+			oldState.R.SessionInfo.Key == newState.R.SessionInfo.Key {
+			for driverNumber, newDriver := range newState.R.DriverList {
+				if oldDriver, ok := oldState.R.DriverList[driverNumber]; ok {
+					if oldDriver.StartingPosition != "" {
+						newDriver.StartingPosition = oldDriver.StartingPosition
+						newState.R.DriverList[driverNumber] = newDriver
+					}
+				}
+			}
+			fmt.Println("Reconnected to the same session, preserving starting positions.")
+		}
+	}
+
 	return newState, nil
 }
 
