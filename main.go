@@ -85,7 +85,7 @@ func main() {
 	f1tvClient = f1tvclient.NewF1TVClient(messageHandlers.HandleNewStreamMessage, messageHandlers.HandleLegacyStreamMessage)
 
 	if autoConnect {
-		manager := sessionmanager.NewManager(f1tvClient, seasonLoader, valkey, &globalState, customEventBroadcaster)
+		manager := sessionmanager.NewManager(f1tvClient, seasonLoader, valkey, &globalState, customEventBroadcaster, sessionRecorder)
 		manager.Start()
 	} else {
 		fmt.Println("Auto-connect mode disabled. F1TV client starting immediately.")

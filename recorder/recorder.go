@@ -54,7 +54,18 @@ func (r *Recorder) Stop() {
 		close(r.stopChan)
 		r.flushTicker.Stop()
 		r.flush()
-		r.generateAndSaveMetadata()
+		r.generateAndSaveMetadata(time.Now())
+	}
+}
+
+func (r *Recorder) FinalizeSessionRecording() {
+	if !r.recordingEnabled {
+		return
+	}
+	r.flush()
+	err := r.generateAndSaveMetadata(time.Now())
+	if err != nil {
+		fmt.Printf("Recorder: Error during session finalization: %v\n", err)
 	}
 }
 
@@ -112,39 +123,43 @@ func (r *Recorder) flush() {
 	}
 }
 
-func (r *Recorder) generateAndSaveMetadata() {
+func (r *Recorder) generateAndSaveMetadata(finishedAt time.Time) error {
 	if !r.recordingEnabled {
-		return
+		return nil
 	}
 
 	globalState := r.globalStateProvider()
 	if globalState == nil {
-		return
+		return fmt.Errorf("cannot save metadata from nil state")
 	}
 
 	recordingPath := r.getRecordingFilePath()
 	if recordingPath == "" {
-		return
+		return nil
 	}
 
 	metadata, err := GenerateMetadataFromState(globalState)
 	if err != nil {
-		fmt.Printf("Recorder: Failed to generate metadata for %s: %v\n", recordingPath, err)
-		return
+		return fmt.Errorf("failed to generate metadata for %s: %w", recordingPath, err)
+	}
+
+	// Overwrite the FinishedAt timestamp with the timestamp of the last message
+	if !finishedAt.IsZero() {
+		metadata.FinishedAt = finishedAt
 	}
 
 	metadataPath := strings.TrimSuffix(recordingPath, ".txt") + ".meta.json"
 	metadataBytes, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
-		fmt.Printf("Recorder: Failed to marshal metadata for %s: %v\n", recordingPath, err)
-		return
+		return fmt.Errorf("failed to marshal metadata for %s: %w", recordingPath, err)
 	}
 
 	if err := os.WriteFile(metadataPath, metadataBytes, 0644); err != nil {
-		fmt.Printf("Recorder: Failed to write metadata file %s: %v\n", metadataPath, err)
-	} else {
-		fmt.Printf("Recorder: Successfully generated and saved metadata to %s\n", metadataPath)
+		return fmt.Errorf("failed to write metadata file %s: %w", metadataPath, err)
 	}
+
+	fmt.Printf("Recorder: Successfully generated and saved metadata to %s\n", metadataPath)
+	return nil
 }
 
 func (r *Recorder) getRecordingFilePath() string {

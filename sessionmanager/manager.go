@@ -5,6 +5,7 @@ import (
 	"f1sockets/api"
 	"f1sockets/f1tvclient"
 	"f1sockets/model"
+	"f1sockets/recorder"
 	"f1sockets/valkeyclient"
 	"fmt"
 	"time"
@@ -16,16 +17,18 @@ type Manager struct {
 	valkey                 *valkeyclient.ValkeyClient
 	globalState            **model.GlobalState
 	customEventBroadcaster model.CustomEventBroadcaster
+	sessionRecorder        *recorder.Recorder
 	sessionEndedCount      int
 }
 
-func NewManager(client *f1tvclient.F1TVClient, loader *api.SeasonLoader, valkey *valkeyclient.ValkeyClient, gs **model.GlobalState, ceb model.CustomEventBroadcaster) *Manager {
+func NewManager(client *f1tvclient.F1TVClient, loader *api.SeasonLoader, valkey *valkeyclient.ValkeyClient, gs **model.GlobalState, ceb model.CustomEventBroadcaster, rec *recorder.Recorder) *Manager {
 	return &Manager{
 		f1tvClient:             client,
 		seasonLoader:           loader,
 		valkey:                 valkey,
 		globalState:            gs,
 		customEventBroadcaster: ceb,
+		sessionRecorder:        rec,
 	}
 }
 
@@ -82,6 +85,9 @@ func (m *Manager) checkAndManageConnection() {
 	} else {
 		if m.f1tvClient.IsRunning() {
 			fmt.Println("No active session. Disconnecting F1TV client...")
+			if m.sessionRecorder != nil {
+				m.sessionRecorder.FinalizeSessionRecording()
+			}
 			if m.valkey != nil && *m.globalState != nil {
 				err := m.valkey.SaveState(context.Background(), *m.globalState)
 				if err != nil {
@@ -134,6 +140,10 @@ func (m *Manager) handleFinalisedSessionCheck(activeEvent *model.Event) bool {
 
 	if m.sessionEndedCount >= endedCountToFinish {
 		fmt.Println("Session finalised. Disconnecting F1TV client...")
+
+		if m.sessionRecorder != nil {
+			m.sessionRecorder.FinalizeSessionRecording()
+		}
 
 		if m.valkey != nil {
 			err := m.valkey.AddCompletedSession(context.Background(), activeEvent.UID)
