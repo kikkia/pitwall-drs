@@ -21,7 +21,7 @@ import (
 
 const (
 	replayListenAddr  = "localhost:8080"
-	recordingFilePath = "recordings/2025/British_Grand_Prix/Qualifying.txt"
+	recordingFilePath = "recordings/2025/Qatar_Grand_Prix/Qualifying.txt"
 	startDelay        = 5 * time.Second
 
 	timestampLayout            = time.RFC3339
@@ -31,9 +31,9 @@ const (
 var (
 	timeFactor int64 = 1
 
-	globalState           *model.GlobalState
-	browserBroadcaster    *broadcaster.Broadcaster
-	lapHistoryBroadcaster model.LapUpdateBroadcaster
+	globalState            *model.GlobalState
+	browserBroadcaster     *broadcaster.Broadcaster
+	customEventBroadcaster model.CustomEventBroadcaster
 
 	firstClientConnected = make(chan struct{})
 	once                 sync.Once
@@ -64,9 +64,9 @@ func main() {
 	defer sessionRecorder.Stop()
 
 	browserBroadcaster = broadcaster.NewBroadcaster(connectionLimiter, sessionRecorder)
-	lapHistoryBroadcaster = model.NewLapHistoryBroadcaster(browserBroadcaster.Broadcast)
+	customEventBroadcaster = model.NewCustomEventBroadcaster(browserBroadcaster.Broadcast)
 	globalState = model.NewEmptyGlobalState()
-	globalState.LapBroadcaster = lapHistoryBroadcaster
+	globalState.Broadcaster = customEventBroadcaster
 
 	go runReplayLogic()
 
@@ -242,7 +242,8 @@ func runReplayLogic() {
 		return
 	}
 
-	for i := 1; i < len(messages); i++ {
+	totalMessages := len(messages)
+	for i := 1; i < totalMessages; i++ {
 		msg := messages[i]
 		delay := msg.Timestamp.Sub(previousTimestamp)
 
@@ -263,6 +264,12 @@ func runReplayLogic() {
 
 		processAndBroadcastMessage(msg.Payload)
 		previousTimestamp = msg.Timestamp
+
+		// Log progress every 100 messages or on the last message
+		if (i+1)%500 == 0 || (i+1) == totalMessages {
+			progress := float64(i+1) / float64(totalMessages) * 100
+			log.Printf("Replay progress: %d/%d (%.2f%%)", i+1, totalMessages, progress)
+		}
 	}
 
 	log.Println("Replay finished or stopped.")
@@ -274,35 +281,37 @@ func processAndBroadcastMessage(payload []byte) {
 		start = time.Now()
 	}
 
-	var signalRMessage map[string]interface{}
-	if err := json.Unmarshal(payload, &signalRMessage); err == nil {
-		if _, ok := signalRMessage["R"].(map[string]interface{}); ok {
-			// For replay, we re-initialize the global state with the full R message
-			// This is different from main.go which only applies updates.
-			// We need to ensure the broadcaster is set after re-initialization.
-			newState, err := model.NewGlobalState(payload, lapHistoryBroadcaster)
+	var signalRMessage interface{}
+	if err := json.Unmarshal(payload, &signalRMessage); err != nil {
+		fmt.Printf("Failed to parse received message as JSON during replay: %v\n", err)
+		return
+	}
+
+	switch msg := signalRMessage.(type) {
+	case map[string]interface{}:
+		// Standard object message (e.g., {"R": ...} or {"M": ...})
+		if _, ok := msg["R"].(map[string]interface{}); ok {
+			newState, err := model.NewGlobalState(payload, customEventBroadcaster, globalState)
 			if err != nil {
 				fmt.Printf("Failed to parse global state message during replay: %v\n", err)
 			} else {
 				globalState = newState
 			}
 		}
-		if mArray, ok := signalRMessage["M"].([]interface{}); ok {
+		if mArray, ok := msg["M"].([]interface{}); ok {
 			for _, msgInterface := range mArray {
 				if msgMap, ok := msgInterface.(map[string]interface{}); ok {
 					if hub, hubOk := msgMap["H"].(string); hubOk && hub == "Streaming" {
 						if method, methodOk := msgMap["M"].(string); methodOk && method == "feed" {
 							if args, argsOk := msgMap["A"].([]interface{}); argsOk {
-								// Check if the event is "ExtrapolatedClock" and replace its timestamp
 								if len(args) > 0 {
 									if eventName, isString := args[0].(string); isString && eventName == "ExtrapolatedClock" {
+										// Update timestamp for live replay feel
 										if len(args) > 1 {
 											if clockData, ok := args[1].(map[string]interface{}); ok {
 												now := time.Now().UTC().Format(time.RFC3339Nano)
 												clockData["Utc"] = now
 												log.Printf("Replaced ExtrapolatedClock 'Utc' property with current time: %s", now)
-
-												// The third argument is also a timestamp, let's update it as well to be consistent.
 												if len(args) > 2 {
 													args[2] = now
 												}
@@ -310,14 +319,11 @@ func processAndBroadcastMessage(payload []byte) {
 										}
 									}
 								}
-
 								if globalState != nil {
 									err := globalState.ApplyFeedUpdate(args)
 									if err != nil {
 										fmt.Printf("Failed to apply feed update during replay: %v\n Update Args: %v: %v\n", err, args[0], args)
 									}
-								} else {
-									fmt.Println("Skipping feed update as global state is not yet initialized in replay.")
 								}
 							}
 						}
@@ -325,16 +331,22 @@ func processAndBroadcastMessage(payload []byte) {
 				}
 			}
 		}
-		// Re-marshal the modified signalRMessage back to payload
-		modifiedPayload, err := json.Marshal(signalRMessage)
-		if err != nil {
-			fmt.Printf("Failed to re-marshal message after timestamp modification: %v\n", err)
-			// If re-marshalling fails, use the original payload for broadcasting
-			modifiedPayload = payload
+		// Re-marshal the potentially modified message
+		modifiedPayload, err := json.Marshal(msg)
+		if err == nil {
+			payload = modifiedPayload
 		}
-		payload = modifiedPayload
-	} else {
-		fmt.Printf("Failed to parse received message as JSON during replay: %v\n", err)
+	case []interface{}:
+		// It's an array, likely a raw feed update. We can try to process it.
+		// This handles cases where the message is just the "A" part of a feed update.
+		if globalState != nil {
+			err := globalState.ApplyFeedUpdate(msg)
+			if err != nil {
+				fmt.Printf("Failed to apply array-based feed update during replay: %v\n", err)
+			}
+		}
+	default:
+		fmt.Printf("Warning: Unhandled message type in replay: %T\n", signalRMessage)
 	}
 
 	// Broadcast the message to all connected browser clients

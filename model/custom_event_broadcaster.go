@@ -9,6 +9,7 @@ import (
 type CustomEventBroadcaster interface {
 	BroadcastLapHistory(driverNum string, completedLap CompletedLap)
 	BroadcastDriverListUpdates(drivers map[string]DriverInfo)
+	BroadcastIncident(incident IncidentEvent)
 }
 
 type CustomEventBroadcasterImpl struct {
@@ -35,6 +36,16 @@ func (b *CustomEventBroadcasterImpl) BroadcastDriverListUpdates(drivers map[stri
 	jsonMessage, err := FormatDriverListUpdateMessage(drivers)
 	if err != nil {
 		fmt.Printf("Error marshalling driver list update message: %v\n", err)
+		return
+	}
+	b.broadcastFunc(jsonMessage)
+}
+
+// BroadcastIncident broadcasts the given incident.
+func (b *CustomEventBroadcasterImpl) BroadcastIncident(incident IncidentEvent) {
+	jsonMessage, err := FormatIncidentMessage(incident)
+	if err != nil {
+		fmt.Printf("Error marshalling incident message: %v\n", err)
 		return
 	}
 	b.broadcastFunc(jsonMessage)
@@ -78,6 +89,23 @@ func FormatDriverListUpdateMessage(drivers map[string]DriverInfo) ([]byte, error
 				"A": []interface{}{
 					"DriverList",
 					updatePayload,
+				},
+			},
+		},
+	}
+	return json.Marshal(message)
+}
+
+// FormatIncidentMessage creates the JSON message for an incident update.
+func FormatIncidentMessage(incident IncidentEvent) ([]byte, error) {
+	message := map[string]interface{}{
+		"M": []map[string]interface{}{
+			{
+				"H": "Streaming",
+				"M": "feed",
+				"A": []interface{}{
+					"Incident",
+					incident,
 				},
 			},
 		},
