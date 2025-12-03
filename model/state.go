@@ -953,6 +953,7 @@ func (gs *GlobalState) updateRaceControlMessages(payloadBytes []byte) error {
 		gs.R.RaceControlMessages = &RaceControlData{Messages: make([]RaceControlMessage, 0)}
 	}
 
+	// Parse RaceControlMessages for incidents since we don't have a specific message for those we have to infer them.
 	processMessage := func(msg RaceControlMessage) {
 		gs.R.RaceControlMessages.Messages = append(gs.R.RaceControlMessages.Messages, msg)
 		incident, driverNumbers := gs.IncidentParser.Parse(msg)
@@ -1326,24 +1327,26 @@ func (gs *GlobalState) GetStateAsJSON() ([]byte, error) {
 
 	// Create the intermediate struct instance in a cleaner format
 	outputR := raceDataForJSON{
-		Heartbeat:           gs.R.Heartbeat,
-		CarDataZ:            gs.R.CarDataZ,
-		PositionZ:           gs.R.PositionZ,
-		ExtrapolatedClock:   gs.R.ExtrapolatedClock,
-		TopThree:            gs.R.TopThree,
-		TimingStats:         gs.R.TimingStats,
-		TimingAppData:       gs.R.TimingAppData,
-		WeatherData:         gs.R.WeatherData,
-		TrackStatus:         gs.R.TrackStatus,
-		DriverList:          gs.R.DriverList,
-		RaceControlMessages: gs.R.RaceControlMessages,
-		SessionInfo:         gs.R.SessionInfo,
-		SessionData:         gs.R.SessionData,
-		TimingData:          gs.R.TimingData,
-		TyreStintSeries:     gs.R.TyreStintSeries,
-		TeamRadio:           gs.R.TeamRadio,
-		LapCount:            gs.R.LapCount,
-		LapHistoryMap:       gs.R.LapHistoryMap,
+		Heartbeat:              gs.R.Heartbeat,
+		CarDataZ:               gs.R.CarDataZ,
+		PositionZ:              gs.R.PositionZ,
+		ExtrapolatedClock:      gs.R.ExtrapolatedClock,
+		TopThree:               gs.R.TopThree,
+		TimingStats:            gs.R.TimingStats,
+		TimingAppData:          gs.R.TimingAppData,
+		WeatherData:            gs.R.WeatherData,
+		TrackStatus:            gs.R.TrackStatus,
+		DriverList:             gs.R.DriverList,
+		RaceControlMessages:    gs.R.RaceControlMessages,
+		SessionInfo:            gs.R.SessionInfo,
+		SessionData:            gs.R.SessionData,
+		TimingData:             gs.R.TimingData,
+		TyreStintSeries:        gs.R.TyreStintSeries,
+		TeamRadio:              gs.R.TeamRadio,
+		ChampionshipPrediction: gs.R.ChampionshipPrediction,
+		LapCount:               gs.R.LapCount,
+		LapHistoryMap:          gs.R.LapHistoryMap,
+		IncidentHistoryMap:     gs.R.IncidentHistoryMap,
 	}
 
 	// Wrap the struct within the top-level "R" key map
