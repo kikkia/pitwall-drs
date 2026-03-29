@@ -1,10 +1,9 @@
-//go:build ignore
-
 package main
 
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -20,16 +19,18 @@ import (
 )
 
 const (
-	replayListenAddr  = "localhost:8080"
-	recordingFilePath = "recordings/2025/Qatar_Grand_Prix/Qualifying.txt"
-	startDelay        = 5 * time.Second
-
 	timestampLayout            = time.RFC3339
 	REPORTING_MESSAGE_INTERVAL = 100
 )
 
 var (
-	timeFactor int64 = 1
+	replayListenAddr  string
+	recordingFilePath string
+	startDelay        time.Duration
+	speedFactor       float64
+	waitForClient     bool
+	maxLineBytes      int
+	timeFactor        float64 = 1.0
 
 	globalState            *model.GlobalState
 	browserBroadcaster     *broadcaster.Broadcaster
@@ -51,6 +52,19 @@ type RecordedMessage struct {
 }
 
 func main() {
+	flag.StringVar(&replayListenAddr, "addr", "0.0.0.0:8080", "HTTP listen address")
+	flag.StringVar(&recordingFilePath, "file", "recordings/2026/Chinese_Grand_Prix/Sprint.txt", "Recording file path")
+	flag.DurationVar(&startDelay, "start-delay", 2*time.Second, "Delay before replay starts after first client")
+	flag.Float64Var(&speedFactor, "speed", 1.0, "Playback speed factor (e.g. 0.5=half speed, 2.0=double speed)")
+	flag.BoolVar(&waitForClient, "wait-for-client", true, "Wait for first client connection before replay")
+	flag.IntVar(&maxLineBytes, "max-line-bytes", 16*1024*1024, "Max line size for scanner buffer")
+	flag.Parse()
+
+	if speedFactor <= 0 {
+		speedFactor = 1.0
+	}
+	timeFactor = speedFactor
+
 	log.Printf("Starting F1 Replay Server on %s", replayListenAddr)
 	log.Printf("Will replay events from: %s", recordingFilePath)
 
@@ -159,10 +173,13 @@ func parseLogLine(line string) (*RecordedMessage, error) {
 }
 
 func runReplayLogic() {
-	log.Println("Replay logic started, waiting for first client...")
-	<-firstClientConnected // Wait for the signal
-	log.Printf("First client detected. Waiting %s before starting replay...", startDelay)
-	time.Sleep(startDelay)
+	log.Println("Replay logic started.")
+	if waitForClient {
+		log.Println("Waiting for first client...")
+		<-firstClientConnected
+		log.Printf("First client detected. Waiting %s before starting replay...", startDelay)
+		time.Sleep(startDelay)
+	}
 	log.Printf("Starting replay from file: %s", recordingFilePath)
 
 	file, err := os.Open(recordingFilePath)
@@ -175,9 +192,11 @@ func runReplayLogic() {
 	var messages []RecordedMessage
 	scanner := bufio.NewScanner(file)
 	// Increase the buffer size to handle long lines
-	const maxCapacity = 1024 * 1024 // 1MB
-	buf := make([]byte, maxCapacity)
-	scanner.Buffer(buf, maxCapacity)
+	if maxLineBytes < 1024*1024 {
+		maxLineBytes = 1024 * 1024
+	}
+	buf := make([]byte, maxLineBytes)
+	scanner.Buffer(buf, maxLineBytes)
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
@@ -235,22 +254,10 @@ func runReplayLogic() {
 	processAndBroadcastMessage(firstMsg.Payload)
 	previousTimestamp = firstMsg.Timestamp
 
-	// raceStart, err := time.Parse(timestampLayout, "2025-07-05T23:00:03+09:00") // quali britan
-	raceStart, err := time.Parse(timestampLayout, "2025-07-06T23:01:51+09:00") // Race br
-	if err != nil {
-		log.Printf("REEEEE %s", err)
-		return
-	}
-
 	totalMessages := len(messages)
 	for i := 1; i < totalMessages; i++ {
 		msg := messages[i]
 		delay := msg.Timestamp.Sub(previousTimestamp)
-
-		if msg.Timestamp.Equal(raceStart) {
-			timeFactor = 1
-			log.Printf("Race started, shifting timeFactor back to 1")
-		}
 
 		if delay < 0 {
 			log.Printf("Warning: Negative delay calculated between message %d and %d. Sending immediately.", i-1, i)
@@ -258,7 +265,7 @@ func runReplayLogic() {
 		}
 
 		if delay > 0 {
-			delay = time.Duration((1000 / timeFactor)) * time.Millisecond
+			delay = time.Duration(float64(delay) / timeFactor)
 			time.Sleep(delay)
 		}
 
