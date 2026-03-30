@@ -1,6 +1,8 @@
 package broadcaster
 
 import (
+	"bytes"
+	"compress/gzip"
 	"f1sockets/metrics"
 	"f1sockets/ratelimiter"
 	"f1sockets/recorder"
@@ -35,6 +37,7 @@ type Broadcaster struct {
 	register          chan *Client
 	unregister        chan *Client
 	upgrader          websocket.Upgrader
+	messageBuffer     [][]byte
 }
 
 func NewBroadcaster(connectionLimiter *ratelimiter.ConnectionLimiter, recorder *recorder.Recorder) *Broadcaster {
@@ -57,6 +60,10 @@ func NewBroadcaster(connectionLimiter *ratelimiter.ConnectionLimiter, recorder *
 }
 
 func (b *Broadcaster) run() {
+	// TODO: make this configurable
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case client := <-b.register:
@@ -73,14 +80,42 @@ func (b *Broadcaster) run() {
 			}
 		case message := <-b.broadcast:
 			b.recorder.Record(message)
-			for client := range b.clients {
-				select {
-				case client.send <- message:
-				default:
-					log.Printf("client %s send buffer full. disconnecting.", client.ip)
-					close(client.send)
-					delete(b.clients, client)
+			b.messageBuffer = append(b.messageBuffer, message)
+		case <-ticker.C:
+			if len(b.messageBuffer) > 0 {
+				// batch together all updates into 1 message for a given window duration
+				capacity := len(`{"type":"bundle","messages":[`) + len(`]}`)
+				for _, msg := range b.messageBuffer {
+					capacity += len(msg) + 1
 				}
+
+				payload := make([]byte, 0, capacity)
+				payload = append(payload, []byte(`{"type":"bundle","messages":[`)...)
+				for i, msg := range b.messageBuffer {
+					if i > 0 {
+						payload = append(payload, ',')
+					}
+					payload = append(payload, msg...)
+				}
+				payload = append(payload, []byte(`]}`)...)
+
+				// compress bytes we send to the client
+				var compressed bytes.Buffer
+				zw := gzip.NewWriter(&compressed)
+				zw.Write(payload)
+				zw.Close()
+				compressedPayload := compressed.Bytes()
+
+				for client := range b.clients {
+					select {
+					case client.send <- compressedPayload:
+					default:
+						log.Printf("client %s send buffer full. disconnecting.", client.ip)
+						close(client.send)
+						delete(b.clients, client)
+					}
+				}
+				b.messageBuffer = nil
 			}
 		}
 	}
@@ -119,7 +154,7 @@ func (c *Client) writePump() {
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			if err := c.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
 				log.Printf("writePump error for client %s: %v", c.ip, err)
 				return
 			}
@@ -156,7 +191,11 @@ func (b *Broadcaster) HandleConnections(w http.ResponseWriter, r *http.Request, 
 	go client.readPump()
 
 	if initialMessage != nil {
-		client.send <- initialMessage
+		var compressed bytes.Buffer
+		zw := gzip.NewWriter(&compressed)
+		zw.Write(initialMessage)
+		zw.Close()
+		client.send <- compressed.Bytes()
 	}
 }
 
