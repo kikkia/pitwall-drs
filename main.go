@@ -17,6 +17,7 @@ import (
 	"f1sockets/model"
 	"f1sockets/ratelimiter"
 	"f1sockets/recorder"
+	"f1sockets/replayer"
 	"f1sockets/sessionmanager"
 	"f1sockets/valkeyclient"
 
@@ -41,11 +42,21 @@ var (
 	f1tvClient         *f1tvclient.F1TVClient
 	browserBroadcaster *broadcaster.Broadcaster
 	sessionRecorder    *recorder.Recorder
+
+	// Replay mode variables
+	replayFile       string
+	replaySpeed      float64
+	replayWaitClient bool
+	activeReplayer   *replayer.Replayer
 )
 
 func init() {
 	flag.BoolVar(&autoConnect, "auto-connect", false, "Automatically connect/disconnect to F1TV based on session times")
 	flag.StringVar(&valkeyAddr, "valkey-addr", os.Getenv("VALKEY_ADDR"), "Address for the Valkey instance. If not set, Valkey is disabled. Can also be set via VALKEY_ADDR env var.")
+	
+	flag.StringVar(&replayFile, "replay-file", "", "Path to recording file to replay. If set, backend runs in replay mode instead of Live F1.")
+	flag.Float64Var(&replaySpeed, "replay-speed", 1.0, "Playback speed multiplier for replay mode")
+	flag.BoolVar(&replayWaitClient, "replay-wait-client", true, "Wait for first client connection before starting replay playback")
 }
 
 func main() {
@@ -84,7 +95,20 @@ func main() {
 	messageHandlers := handlers.NewMessageHandlers(&globalState, customEventBroadcaster, browserBroadcaster, f1tvClient, &skippedFeedUpdates)
 	f1tvClient = f1tvclient.NewF1TVClient(messageHandlers.HandleNewStreamMessage, messageHandlers.HandleLegacyStreamMessage)
 
-	if autoConnect {
+	if replayFile != "" {
+		fmt.Printf("Replay mode enabled. Replaying from %s\n", replayFile)
+		
+		onReplayMessage := func(payload []byte) {
+			if len(payload) > 0 && payload[0] == '[' {
+				messageHandlers.HandleNewStreamMessage(payload)
+			} else {
+				messageHandlers.HandleLegacyStreamMessage(payload)
+			}
+		}
+
+		activeReplayer = replayer.NewReplayer(replayFile, replaySpeed, replayWaitClient, onReplayMessage)
+		go activeReplayer.Start()
+	} else if autoConnect {
 		manager := sessionmanager.NewManager(f1tvClient, seasonLoader, valkey, &globalState, customEventBroadcaster, sessionRecorder)
 		manager.Start()
 	} else {
@@ -105,6 +129,10 @@ func main() {
 			initialState = nil
 		}
 		browserBroadcaster.HandleConnections(w, r, initialState)
+
+		if activeReplayer != nil {
+			activeReplayer.NotifyFirstClient()
+		}
 	})
 
 	http.Handle("/state", metrics.InstrumentHandler(http.HandlerFunc(handleState)))
